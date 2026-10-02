@@ -1,6 +1,8 @@
 import { promises as fsp } from 'fs';
 import * as path from 'path';
 import { setIcon } from 'obsidian';
+import { getRegisteredWorktrees } from './searchEngine';
+import { FILE_SEARCH_RESULTS_CAP, searchFilePathIndex } from './filePathIndex.ts';
 
 interface TreeNode {
 	name: string;
@@ -11,7 +13,7 @@ interface TreeNode {
 }
 
 /** Maximum number of search results before showing a "more results" hint. */
-export const SEARCH_RESULTS_CAP = 200;
+export const SEARCH_RESULTS_CAP = FILE_SEARCH_RESULTS_CAP;
 
 // [lucide icon name, css colour class]
 const EXT_ICON: Record<string, [string, string]> = {
@@ -73,6 +75,8 @@ export class FileTree {
 	private rootPath = '';
 	private treeRoot: TreeNode | null = null;
 	private searchSeq = 0;
+	private includeWorktrees = false;
+	private worktreeRoots: string[] | null = null;
 
 	constructor(
 		container: HTMLElement,
@@ -92,9 +96,21 @@ export class FileTree {
 		if (this.rootPath) void this.loadPath(this.rootPath);
 	}
 
+	/** Includes conventional and Git-registered nested worktrees in tree operations. */
+	setIncludeWorktrees(includeWorktrees: boolean) {
+		if (this.includeWorktrees === includeWorktrees) return;
+		this.includeWorktrees = includeWorktrees;
+		this.treeRoot = null;
+		if (this.rootPath) void this.loadPath(this.rootPath);
+	}
+
 	/** Loads `dirPath` as the new root and re-renders the tree. */
 	async loadPath(dirPath: string) {
 		this.rootPath = dirPath;
+		this.worktreeRoots = await this.normalizeWorktreeRoots(
+			dirPath,
+			await getRegisteredWorktrees(dirPath),
+		);
 		this.treeRoot = await this.buildNode(dirPath, true);
 		this.renderTree();
 	}
@@ -103,13 +119,17 @@ export class FileTree {
 	async search(query: string) {
 		const seq = ++this.searchSeq;
 		this.container.empty();
-		if (!query.trim()) {
+		if (query.length === 0) {
 			if (this.treeRoot) this.renderNode(this.treeRoot, this.container, 0);
 			return;
 		}
-		const { matches, truncated } = await this.findFiles(
-			this.rootPath, query.toLowerCase(), [], { count: 0 },
-		);
+		const { files: matches, truncated } = await searchFilePathIndex(this.rootPath, query, {
+			matchMode: 'fuzzy',
+			includeWorktrees: this.includeWorktrees,
+			showHidden: this.showHidden,
+			limit: SEARCH_RESULTS_CAP,
+			worktreeRoots: this.worktreeRoots ?? [],
+		});
 		// A newer keystroke already replaced the list — drop stale results.
 		if (seq !== this.searchSeq) return;
 		this.container.empty();
@@ -143,30 +163,26 @@ export class FileTree {
 		}
 	}
 
-	private async findFiles(
-		dir: string,
-		query: string,
-		results: string[],
-		state: { count: number },
-	): Promise<{ matches: string[]; truncated: boolean }> {
-		if (state.count >= SEARCH_RESULTS_CAP) return { matches: results, truncated: true };
-		let entries: string[];
-		try { entries = await fsp.readdir(dir); } catch { return { matches: results, truncated: false }; }
-		if (!this.showHidden) entries = entries.filter((e) => !e.startsWith('.'));
-		for (const name of entries) {
-			if (state.count >= SEARCH_RESULTS_CAP) return { matches: results, truncated: true };
-			const full = path.join(dir, name);
-			let isDir = false;
-			try { isDir = (await fsp.stat(full)).isDirectory(); } catch { continue; }
-			if (isDir) {
-				const sub = await this.findFiles(full, query, results, state);
-				if (sub.truncated) return sub;
-			} else if (name.toLowerCase().includes(query)) {
-				results.push(full);
-				state.count++;
-			}
-		}
-		return { matches: results, truncated: false };
+	private async normalizeWorktreeRoots(root: string, worktrees: string[]): Promise<string[]> {
+		let canonicalRoot = path.resolve(root);
+		try { canonicalRoot = await fsp.realpath(root); } catch { /* Keep the selected path if it disappeared. */ }
+		return Promise.all(worktrees.map(async (worktree) => {
+			let canonicalWorktree = path.resolve(worktree);
+			try { canonicalWorktree = await fsp.realpath(worktree); } catch { /* Keep the discovered path. */ }
+			const relative = path.relative(canonicalRoot, canonicalWorktree);
+			return relative === '' || (!relative.startsWith(`..${path.sep}`) && relative !== '..' && !path.isAbsolute(relative))
+				? path.resolve(root, relative)
+				: canonicalWorktree;
+		}));
+	}
+
+	private isWorktreePath(dir: string): boolean {
+		const rel = path.relative(this.rootPath, dir).split(path.sep).filter(Boolean);
+		if (rel.some((part, index) =>
+			(part === '.worktrees' || part === 'worktrees') ||
+			(part === '.claude' && rel[index + 1] === 'worktrees'),
+		)) return true;
+		return (this.worktreeRoots ?? []).some((worktree) => dir === worktree || dir.startsWith(`${worktree}${path.sep}`));
 	}
 
 	private renderTree() {
@@ -177,17 +193,25 @@ export class FileTree {
 	private async buildNode(fullPath: string, expanded = false): Promise<TreeNode> {
 		const name = path.basename(fullPath) || fullPath;
 		let isDir = false;
-		try { isDir = (await fsp.stat(fullPath)).isDirectory(); } catch { return { name, fullPath, isDir: false }; }
+		try {
+			const stat = await fsp.lstat(fullPath);
+			if (stat.isSymbolicLink()) return { name, fullPath, isDir: false };
+			isDir = stat.isDirectory();
+		} catch { return { name, fullPath, isDir: false }; }
 		const node: TreeNode = { name, fullPath, isDir, expanded };
 		if (isDir && expanded) node.children = await this.readDir(fullPath);
 		return node;
 	}
 
 	private async readDir(dirPath: string): Promise<TreeNode[]> {
+		if (!this.includeWorktrees && this.isWorktreePath(dirPath)) return [];
 		let entries: string[];
 		try { entries = await fsp.readdir(dirPath); } catch { return []; }
 		if (!this.showHidden) entries = entries.filter((e) => !e.startsWith('.'));
-		const nodes = await Promise.all(entries.map((name) => this.buildNode(path.join(dirPath, name))));
+		const visibleEntries = this.includeWorktrees
+			? entries
+			: entries.filter((name) => !this.isWorktreePath(path.join(dirPath, name)));
+		const nodes = await Promise.all(visibleEntries.map((name) => this.buildNode(path.join(dirPath, name))));
 		return nodes.sort((a, b) => {
 			if (a.isDir !== b.isDir) return a.isDir ? -1 : 1;
 			return a.name.localeCompare(b.name);

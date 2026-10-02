@@ -1,10 +1,12 @@
 import tseslint from 'typescript-eslint';
 import obsidianmd from 'eslint-plugin-obsidianmd';
 import globals from 'globals';
+import importPlugin from 'eslint-plugin-import';
 import { globalIgnores } from 'eslint/config';
 
 export default tseslint.config(
 	globalIgnores([
+		'tests',
 		'node_modules',
 		'dist',
 		'esbuild.config.mjs',
@@ -31,6 +33,7 @@ export default tseslint.config(
 	},
 	...obsidianmd.configs.recommended,
 	{
+		plugins: { import: importPlugin },
 		// @codemirror/* and @lezer/* are Obsidian-provided externals (not bundled).
 		// They live in devDependencies intentionally — allow importing them from src.
 		rules: {
