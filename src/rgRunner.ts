@@ -42,7 +42,9 @@ export function resolveRgExecutable(): Promise<string | null> {
 }
 
 export async function runRipgrep(args: string[], signal: AbortSignal, maxBytes = 8 * 1024 * 1024): Promise<RgOutput> {
+	if (signal.aborted) throw new Error('Search cancelled');
 	const executable = await resolveRgExecutable();
+	if (signal.aborted) throw new Error('Search cancelled');
 	if (!executable) {
 		const error = new Error('ripgrep executable was not found') as NodeJS.ErrnoException;
 		error.code = 'ENOENT';
