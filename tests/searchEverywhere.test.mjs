@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { mkdtemp, mkdir, rm, symlink, writeFile } from 'node:fs/promises';
+import { mkdtemp, mkdir, realpath, rm, symlink, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
@@ -9,7 +9,7 @@ import { normalizeSearchMode, DoubleShiftGesture } from '../src/searchMode.ts';
 import { searchContent, searchContentFallback } from '../src/searchEngine.ts';
 
 async function fixture(t) {
-	const root = await mkdtemp(path.join(os.tmpdir(), 'source-observer-everywhere-'));
+	const root = await realpath(await mkdtemp(path.join(os.tmpdir(), 'source-observer-everywhere-')));
 	t.after(() => rm(root, { recursive: true, force: true }));
 	await mkdir(path.join(root, 'src'));
 	await writeFile(path.join(root, 'src', 'DashboardController.php'), '<?php\nDashboard needle\n');
@@ -217,7 +217,8 @@ test('regex errors preserve matching file results and a failed folder preserves 
 	const invalid = await batches(context, 'all', '[', { regex: true });
 	assert.match(invalid.get('text').error, /regex|regular expression|parse/i);
 	assert.equal(invalid.get('files').error, undefined);
-	context.roots = [path.join(context.root, 'missing'), context.root];
+	// Keep the failed root independent: a nested root is intentionally deduplicated.
+	context.roots = [`${context.root}-missing`, context.root];
 	const mixed = await batches(context, 'text', 'Dashboard');
 	assert.equal(mixed.get('text').results.length, 2);
 	assert.match(mixed.get('text').error, /missing/);
