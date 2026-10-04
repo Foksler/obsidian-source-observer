@@ -26,8 +26,8 @@ export const VIEW_TYPE = 'source-observer';
 
 /** Debounce delay for the file-tree search input, in ms. */
 const SEARCH_DEBOUNCE_MS = 0;
-/** Interval for polling `git status` when fs.watch is unavailable, in ms. */
-const GIT_POLL_MS = 5000;
+/** Backup refresh of the file tree and Git changes when filesystem events are missed. */
+const PROJECT_POLL_MS = 5000;
 
 interface ElectronRemote {
 	dialog: {
@@ -396,18 +396,22 @@ export class SourceObserverView extends ItemView {
 		// files, platforms without reliable recursive watching).
 		if (this.pollTimer === null) {
 			this.pollTimer = this.registerInterval(
-				window.setInterval(() => { void this.refreshChanges(); }, GIT_POLL_MS),
+				window.setInterval(() => {
+					void this.refreshChanges();
+					void this.fileTree.refresh().catch(() => {});
+				}, PROJECT_POLL_MS),
 			);
 		}
 	}
 
-	// Watch .git/index (staged changes) and .git/refs (branch/commit updates).
-	// Both share a debounce so rapid saves don't hammer git.
+	// Watch path changes for the tree and search index, plus Git metadata changes.
 	private startWatching() {
 		this.stopWatching();
 		try {
 			const root = this.repoPath;
+			const folderRequest = this.folderRequestId;
 			const watcher = fs.watch(root, { recursive: true }, (event, filename) => {
+				if (this.closed || folderRequest !== this.folderRequestId || root !== this.repoPath) return;
 				if (event !== 'rename') return; // Content edits do not change file paths.
 				const parts = filename?.toString().split(/[\\/]/) ?? [];
 				if (parts.some((part) => ['.git', this.app.vault.configDir, 'node_modules'].includes(part))) return;
@@ -419,8 +423,10 @@ export class SourceObserverView extends ItemView {
 				if (this.fileIndexTimer !== null) window.clearTimeout(this.fileIndexTimer);
 				this.fileIndexTimer = window.setTimeout(() => {
 					this.fileIndexTimer = null;
+					if (this.closed || folderRequest !== this.folderRequestId || root !== this.repoPath) return;
 					invalidateFileIndex(root);
 					void warmFileIndex(root, this.plugin.settings.includeWorktrees).catch(() => {});
+					void this.fileTree.refresh().catch(() => {});
 				}, 80);
 			});
 			watcher.on('error', () => { watcher.close(); });

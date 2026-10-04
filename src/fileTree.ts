@@ -4,14 +4,7 @@ import { setIcon } from 'obsidian';
 import { setFolderIcon } from './folderIcons';
 import { getRegisteredWorktrees } from './searchEngine';
 import { FILE_SEARCH_RESULTS_CAP, searchFilePathIndex } from './filePathIndex.ts';
-
-interface TreeNode {
-	name: string;
-	fullPath: string;
-	isDir: boolean;
-	children?: TreeNode[];
-	expanded?: boolean;
-}
+import { refreshTree, type TreeNode } from './fileTreeRefresh';
 
 /** Maximum number of search results before showing a "more results" hint. */
 export const SEARCH_RESULTS_CAP = FILE_SEARCH_RESULTS_CAP;
@@ -77,6 +70,8 @@ export class FileTree {
 	private treeRoot: TreeNode | null = null;
 	private searchSeq = 0;
 	private loadSeq = 0;
+	private refreshSeq = 0;
+	private searchQuery = '';
 	private disposed = false;
 	private includeWorktrees = false;
 	private worktreeRoots: string[] | null = null;
@@ -115,6 +110,7 @@ export class FileTree {
 	async loadPath(dirPath: string) {
 		const seq = ++this.loadSeq;
 		this.searchSeq++;
+		this.searchQuery = '';
 		if (dirPath !== this.rootPath) this.selectedPath = null;
 		this.rootPath = dirPath;
 		this.treeRoot = null;
@@ -131,11 +127,43 @@ export class FileTree {
 		this.renderTree();
 	}
 
+	/** Update paths on disk while retaining disclosure, selection, focus and scroll. */
+	async refresh() {
+		const root = this.treeRoot;
+		if (!root || this.disposed) return;
+		const generation = this.loadSeq, request = ++this.refreshSeq;
+		const refreshed = await refreshTree(root, (dir) => this.readDir(dir, generation));
+		if (this.disposed || generation !== this.loadSeq || request !== this.refreshSeq || root !== this.treeRoot) return;
+		if (!refreshed.changed && !this.searchQuery) return;
+		const selection = this.selectedPath;
+		let selectionExists = true;
+		if (selection) {
+			try { await fsp.access(selection.path); }
+			catch { selectionExists = false; }
+		}
+		if (this.disposed || generation !== this.loadSeq || request !== this.refreshSeq || root !== this.treeRoot) return;
+		this.treeRoot = refreshed.node;
+		if (!selectionExists && this.selectedPath === selection) this.selectedPath = null;
+		const active = this.container.ownerDocument.activeElement;
+		const focusedPath = this.container.contains(active) ? (active as HTMLElement | null)?.dataset?.path : undefined;
+		const scrollTop = this.container.scrollTop;
+		if (this.searchQuery) await this.search(this.searchQuery);
+		else this.renderTree();
+		if (this.disposed || generation !== this.loadSeq || request !== this.refreshSeq) return;
+		if (focusedPath) {
+			const rows = Array.from(this.container.querySelectorAll<HTMLElement>('.so-tree-row'));
+			const focused = rows.find((row) => row.dataset.path === focusedPath);
+			(focused ?? rows.find((row) => row.tabIndex === 0))?.focus({ preventScroll: true });
+		}
+		this.container.scrollTop = scrollTop;
+	}
+
 	getSelectedPath() { return this.selectedPath ? { ...this.selectedPath } : null; }
 	hasFocus() { return this.container.contains(this.container.ownerDocument.activeElement); }
 
 	/** Reveal the current file without opening it again or changing the editor. */
 	async reveal(filePath: string): Promise<boolean> {
+		this.refreshSeq++;
 		let node = this.treeRoot;
 		if (!node || this.disposed) return false;
 		const target = path.resolve(filePath), relative = path.relative(this.rootPath, target);
@@ -208,14 +236,15 @@ export class FileTree {
 	/** Filters the tree to files whose name contains `query`; clears filter when query is empty. */
 	async search(query: string) {
 		const seq = ++this.searchSeq;
+		this.searchQuery = query;
 		if (this.disposed) return;
-		this.container.empty();
 		if (!this.rootPath) {
+			this.container.empty();
 			this.container.createEl('span', { cls: 'so-search-empty', text: 'Open a folder first.' });
 			return;
 		}
 		if (query.length === 0) {
-			if (this.treeRoot) this.renderNode(this.treeRoot, this.container, 0);
+			this.renderTree();
 			return;
 		}
 		const { files: matches, truncated } = await searchFilePathIndex(this.rootPath, query, {
@@ -346,6 +375,7 @@ export class FileTree {
 			}
 
 			row.addEventListener('click', () => {
+				this.refreshSeq++;
 				node.expanded = !node.expanded;
 				row.setAttribute('aria-expanded', String(node.expanded));
 				setIcon(chevron, node.expanded ? 'chevron-down' : 'chevron-right');

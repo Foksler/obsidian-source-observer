@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { mkdtemp, rm } from 'node:fs/promises';
+import { mkdtemp, mkdir, rm } from 'node:fs/promises';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import test from 'node:test';
@@ -153,7 +153,7 @@ function setupView(activePath, paths = [activePath]) {
 	};
 	const fileTree = {
 		async loadPath(root) { return harness.loadTree(root); },
-		async search() {}, setIncludeWorktrees() {}, setShowHidden() {}, dispose() {},
+		async search() {}, async refresh() {}, setIncludeWorktrees() {}, setShowHidden() {}, dispose() {},
 	};
 	Object.assign(view, {
 		plugin,
@@ -196,6 +196,39 @@ function setupView(activePath, paths = [activePath]) {
 	});
 	return { view, harness, codePane, editorTabs, searchPanel };
 }
+
+test('filesystem creation events refresh the active tree even in a non-Git folder', async (t) => {
+	const root = await mkdtemp(path.join(tempDir, 'watch-'));
+	const { view } = setupView(root);
+	globalThis.window.setTimeout = setTimeout;
+	globalThis.window.clearTimeout = clearTimeout;
+	view.stopWatching = () => SourceObserverView.prototype.stopWatching.call(view);
+	view.isRepo = false;
+	const refreshed = deferred();
+	view.fileTree.refresh = async () => refreshed.resolve(view.repoPath);
+	t.after(() => view.stopWatching());
+	SourceObserverView.prototype.startWatching.call(view);
+	assert.ok(view.watchers.length > 0);
+	await mkdir(path.join(root, 'created-after-opening'));
+	let timeout;
+	try {
+		assert.equal(await Promise.race([refreshed.promise, new Promise((_, reject) => {
+			timeout = setTimeout(() => reject(new Error('Tree did not refresh after directory creation')), 3000);
+		})]), root);
+	} finally { clearTimeout(timeout); }
+});
+
+test('backup polling refreshes the tree when filesystem events are missed', async () => {
+	const { view } = setupView('/tmp/so-poll-a', ['/tmp/so-poll-a', '/tmp/so-poll-b']);
+	view.pollTimer = null;
+	let poll;
+	globalThis.window.setInterval = callback => { poll = callback; return 1; };
+	await view.activateFolder('/tmp/so-poll-b');
+	let refreshes = 0;
+	view.fileTree.refresh = async () => { refreshes++; };
+	poll();
+	assert.equal(refreshes, 1);
+});
 
 test('choosing text in another folder switches sessions before opening the exact occurrence', async () => {
 	const a = '/tmp/source-observer-folder-a', b = '/tmp/source-observer-folder-b';

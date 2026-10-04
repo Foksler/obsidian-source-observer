@@ -1,20 +1,20 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { mkdtemp, mkdir, writeFile, rm } from 'node:fs/promises';
+import { mkdtemp, mkdir, rename, writeFile, rm } from 'node:fs/promises';
 import path from 'node:path';
 import os from 'node:os';
 import { build } from 'esbuild';
 
-const bundle = await build({ entryPoints: ['src/fileTree.ts'], bundle: true, platform: 'node', format: 'esm', write: false,
+const bundle = await build({ stdin: { contents: "export { FileTree } from './src/fileTree.ts'; export { invalidateFileIndex } from './src/filePathIndex.ts';", resolveDir: process.cwd() }, bundle: true, platform: 'node', format: 'esm', write: false,
  plugins: [{ name: 'tree-test', setup(api) {
   api.onResolve({ filter: /^obsidian$/ }, () => ({ path: 'obsidian', namespace: 'shim' }));
   api.onLoad({ filter: /.*/, namespace: 'shim' }, () => ({ contents: 'export function setIcon(element, name) { element.icon = name; }', loader: 'js' }));
   api.onResolve({ filter: /^\.\/searchEngine$/ }, () => ({ path: 'search', namespace: 'search' }));
   api.onLoad({ filter: /.*/, namespace: 'search' }, () => ({ contents: 'export async function getRegisteredWorktrees() { return []; }', loader: 'js' }));
  } }] });
-const { FileTree } = await import(`data:text/javascript;base64,${Buffer.from(bundle.outputFiles[0].text).toString('base64')}`);
+const { FileTree, invalidateFileIndex } = await import(`data:text/javascript;base64,${Buffer.from(bundle.outputFiles[0].text).toString('base64')}`);
 class Element {
- children = []; dataset = {}; attrs = {}; classes = new Set(); listeners = new Map();
+ children = []; dataset = {}; attrs = {}; classes = new Set(); listeners = new Map(); scrollTop = 0;
  constructor(options = {}, document = { activeElement: null }) { this.ownerDocument = document; for (const cls of (options.cls ?? '').split(' ')) this.classes.add(cls); }
  setAttribute(key, value) { this.attrs[key] = value; }
  setCssProps() {} addClass(cls) { this.classes.add(cls); } removeClass(cls) { this.classes.delete(cls); }
@@ -23,6 +23,7 @@ class Element {
  createDiv(options) { const child = new Element(options, this.ownerDocument); child.parent = this; this.children.push(child); return child; }
  createSpan(options) { return this.createDiv(options); }
  querySelectorAll(selector) { const cls = selector.slice(1); return this.children.flatMap(child => [...(child.classes.has(cls) ? [child] : []), ...child.querySelectorAll(selector)]); }
+ contains(element) { return element === this || this.children.some(child => child.contains(element)); }
  focus() { this.ownerDocument.activeElement = this; this.listeners.get('focus')?.(); }
  scrollIntoView() { this.scrolled = true; }
 }
@@ -106,5 +107,82 @@ test('folder disclosure follows expansion and collapse without opening a file', 
   assert.equal(chevron.icon, 'chevron-down');
   assert.equal(icon.dataset.icon, 'folder-src-open');
   assert.deepEqual(opened, []);
+ } finally { await fixture.cleanup(); }
+});
+
+test('refresh shows new empty and nested folders without reopening the root or losing tree state', async () => {
+ const fixture = await setup();
+ try {
+  const { tree, root, file, container, opened } = fixture;
+  await tree.reveal(file);
+  container.scrollTop = 173;
+  await mkdir(path.join(root, 'new-empty'));
+  await mkdir(path.join(root, 'src', 'nested', 'new-child'));
+  await tree.refresh();
+  const rows = container.querySelectorAll('.so-tree-row');
+  assert.ok(rows.some(row => row.dataset.path === path.join(root, 'new-empty')));
+  assert.ok(rows.some(row => row.dataset.path === path.join(root, 'src', 'nested', 'new-child')));
+  assert.ok(rows.filter(row => [root, path.join(root, 'src'), path.dirname(file)].includes(row.dataset.path)).every(row => row.attrs['aria-expanded'] === 'true'));
+  assert.deepEqual(tree.getSelectedPath(), { path: file, isDirectory: false });
+  assert.equal(container.ownerDocument.activeElement.dataset.path, file);
+  assert.equal(container.scrollTop, 173);
+  assert.deepEqual(opened, []);
+ } finally { await fixture.cleanup(); }
+});
+
+test('refresh handles renames and deletions and refreshes cached collapsed branches', async () => {
+ const fixture = await setup();
+ try {
+  const { tree, root, file, container } = fixture;
+  await tree.reveal(file);
+  const src = container.querySelectorAll('.so-tree-row').find(row => row.dataset.path === path.join(root, 'src'));
+  src.listeners.get('click')();
+  const renamed = path.join(path.dirname(file), 'Renamed.php');
+  await rename(file, renamed);
+  await tree.refresh();
+  assert.deepEqual(tree.getSelectedPath(), { path: root, isDirectory: true });
+  const refreshed = container.querySelectorAll('.so-tree-row').find(row => row.dataset.path === path.join(root, 'src'));
+  assert.equal(refreshed.attrs['aria-expanded'], 'false');
+  refreshed.listeners.get('click')();
+  let rows = container.querySelectorAll('.so-tree-row');
+  assert.ok(rows.some(row => row.dataset.path === renamed));
+  assert.ok(!rows.some(row => row.dataset.path === file));
+  await rm(path.dirname(file), { recursive: true });
+  await tree.refresh();
+  rows = container.querySelectorAll('.so-tree-row');
+  assert.ok(!rows.some(row => row.dataset.path === path.dirname(file)));
+ } finally { await fixture.cleanup(); }
+});
+
+test('refresh keeps the active filename filter and includes newly created matching files', async () => {
+ const fixture = await setup();
+ try {
+  const { tree, root, container } = fixture;
+  await tree.search('Current');
+  const added = path.join(root, 'CurrentNew.php');
+  await writeFile(added, '<?php');
+  invalidateFileIndex(root);
+  await tree.refresh();
+  assert.deepEqual(container.querySelectorAll('.so-tree-row').map(row => row.dataset.path).sort(), [fixture.file, added].sort());
+ } finally { await fixture.cleanup(); }
+});
+
+test('unchanged refresh preserves existing rows and late refresh cannot replace another folder', async () => {
+ const fixture = await setup();
+ try {
+  const { tree, root, container } = fixture;
+  const original = container.querySelectorAll('.so-tree-row')[0];
+  await tree.refresh();
+  assert.equal(container.querySelectorAll('.so-tree-row')[0], original);
+  const readDir = tree.readDir.bind(tree);
+  let resume;
+  tree.readDir = async (...args) => { if (args[0] === root) await new Promise(resolve => { resume = resolve; }); return readDir(...args); };
+  const updating = tree.refresh();
+  const next = path.join(root, 'src', 'nested');
+  await tree.loadPath(next);
+  resume();
+  await updating;
+  assert.equal(container.querySelectorAll('.so-tree-row')[0].dataset.path, next);
+  assert.equal(tree.getSelectedPath(), null);
  } finally { await fixture.cleanup(); }
 });
