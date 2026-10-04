@@ -215,7 +215,7 @@ test('overlapping folders and symlink aliases do not duplicate file or text resu
 test('regex errors preserve matching file results and a failed folder preserves the other folder results', async (t) => {
 	const context = await fixture(t);
 	const invalid = await batches(context, 'all', '[', { regex: true });
-	assert.match(invalid.get('text').error, /regex|parse/i);
+	assert.match(invalid.get('text').error, /regex|regular expression|parse/i);
 	assert.equal(invalid.get('files').error, undefined);
 	context.roots = [path.join(context.root, 'missing'), context.root];
 	const mixed = await batches(context, 'text', 'Dashboard');

@@ -4,7 +4,7 @@ import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 import { searchContentPage } from '../src/contentSearchPage.ts';
-import { streamRipgrep } from '../src/rgRunner.ts';
+import { resolveRgExecutable, streamRipgrep } from '../src/rgRunner.ts';
 import { searchContent, searchContentFallback } from '../src/searchEngine.ts';
 
 async function fixture(t, text) {
@@ -23,6 +23,7 @@ test('counts every occurrence beyond 1000, pages through a single file and prese
 });
 
 test('JSON output exceeding the old 8 MiB cap is fully counted while previews remain bounded', async (t) => {
+	if (!await resolveRgExecutable()) return t.skip('Requires ripgrep JSON streaming');
 	const root = await fixture(t, `${'x'.repeat(600_000)}needle\n`.repeat(16));
 	const page = await searchContentPage(root, { query: 'needle' }, new AbortController().signal, 2, 14);
 	assert.equal(page.totalMatches, 16);
@@ -38,7 +39,7 @@ test('Unicode coordinates and case, word, regex and glob filters match the origi
 	assert.equal((await search({ query: 'Needle', caseSensitive: true, wholeWord: true })).totalMatches, 1);
 	assert.equal((await search({ query: 'N[a-z]+', regex: true, caseSensitive: true })).totalMatches, 2);
 	assert.equal((await search({ query: 'needle', excludeGlob: '**/*.txt' })).totalMatches, 0);
-	await assert.rejects(search({ query: '[', regex: true }), /regex|parse/i);
+	await assert.rejects(search({ query: '[', regex: true }), /regex|regular expression|parse/i);
 });
 
 test('folder-relative include and exclude globs work outside the host working directory in both search modes', async (t) => {
@@ -67,6 +68,7 @@ test('folder-relative include and exclude globs work outside the host working di
 });
 
 test('aborting a live stream rejects and a consumer error is propagated without escaping the process callback', async (t) => {
+	if (!await resolveRgExecutable()) return t.skip('Requires a live ripgrep process');
 	const root = await fixture(t, 'needle\n'.repeat(2001));
 	const controller = new AbortController();
 	await assert.rejects(streamRipgrep(['--json', 'needle', root], controller.signal, () => controller.abort()), /cancelled/i);

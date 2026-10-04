@@ -76,7 +76,7 @@ test('Directory cannot escape the active folder through a relative path or symli
 	await assert.rejects(search(context, { ...state, directory: '../inactive' }), /inside the active folder/);
 	await symlink(path.join(context.root, '..', 'inactive'), path.join(context.root, 'external'), 'dir');
 	await assert.rejects(search(context, { ...state, directory: 'external' }), /inside the active folder/);
-	await assert.rejects(search(context, { ...state, directory: context.root, query: '[', options: { regex: true } }), /regex|parse/);
+	await assert.rejects(search(context, { ...state, directory: context.root, query: '[', options: { regex: true } }), /regex|regular expression|parse/i);
 	const controller = new AbortController(); controller.abort();
 	await assert.rejects(searchFindInFiles(context, state, controller.signal), /cancelled/);
 });
