@@ -24,6 +24,7 @@ export interface SearchOptions {
 	includeGlob?: string;
 	excludeGlob?: string;
 	includeWorktrees?: boolean;
+	showHidden?: boolean;
 	limit?: number;
 }
 
@@ -67,10 +68,15 @@ export function makeRgArgs(
 	ignoreParent = false,
 	scanRoots: string[] = [root],
 ): string[] {
-	const args = ['--json', '--line-number', '--column', '--no-heading', '--color', 'never', '--hidden'];
+	const args = ['--json', '--line-number', '--column', '--no-heading', '--color', 'never'];
+	if (options.showHidden !== false) args.push('--hidden');
 	if (ignoreParent) args.push('--no-ignore-parent');
 	if (!options.caseSensitive) args.push('--ignore-case');
 	if (options.wholeWord) args.push('--word-regexp');
+	// Positive globs override ripgrep's hidden-file and exclusion rules unless
+	// the mandatory exclusions follow them.
+	for (const glob of splitGlobs(options.includeGlob)) args.push('--glob', glob);
+	if (options.showHidden === false) args.push('--glob', '!**/.*', '--glob', '!**/.*/**');
 	for (const glob of DEFAULT_IGNORES) {
 		args.push('--glob', `!${glob}`, '--glob', `!**/${glob}/**`);
 	}
@@ -80,16 +86,17 @@ export function makeRgArgs(
 			args.push('--glob', `!${glob}`, '--glob', `!${glob}/**`, '--glob', `!**/${glob}`, '--glob', `!**/${glob}/**`);
 		}
 		for (const worktree of registeredWorktrees) {
-			const relative = path.relative(root, worktree).split(path.sep).join('/');
+			const relative = path.relative(canonicalPath(root), canonicalPath(worktree)).split(path.sep).join('/');
 			if (!relative || relative.startsWith('../') || path.isAbsolute(relative)) continue;
 			args.push('--glob', `!${relative}`, '--glob', `!${relative}/**`);
 		}
 	}
-	for (const glob of splitGlobs(options.includeGlob)) args.push('--glob', glob);
 	for (const glob of splitGlobs(options.excludeGlob)) args.push('--glob', `!${glob}`);
 	if (options.regex) args.push('--regexp', options.query);
 	else args.push('--fixed-strings', '--regexp', options.query);
-	args.push('--', ...scanRoots);
+	// Run from root so path globs are relative to the selected folder, including
+	// the additional worktree scans. The host app's working directory is unrelated.
+	args.push('--', ...scanRoots.map((scanRoot) => path.relative(canonicalPath(root), canonicalPath(scanRoot)) || '.'));
 	return args;
 }
 
@@ -334,6 +341,7 @@ async function fallbackSearch(root: string, options: SearchOptions, signal: Abor
 		try { entries = await fsp.readdir(dir, { withFileTypes: true }); } catch { return; }
 		for (const entry of entries) {
 			if (signal.aborted) return;
+			if (options.showHidden === false && entry.name.startsWith('.')) continue;
 			const fullPath = path.join(dir, entry.name);
 			const relative = path.relative(root, fullPath).split(path.sep).join('/');
 			if (entry.isSymbolicLink()) continue;
@@ -399,9 +407,10 @@ async function fallbackSearch(root: string, options: SearchOptions, signal: Abor
 
 export async function searchContent(root: string, options: SearchOptions, signal: AbortSignal): Promise<SearchResultSet> {
 	if (!options.query) return Object.assign([], { truncated: false });
+	await fsp.access(root);
 	const worktrees = await getRegisteredWorktrees(root);
 	try {
-		const output = await runRipgrep(makeRgArgs(root, options, worktrees), signal);
+		const output = await runRipgrep(makeRgArgs(root, options, worktrees), signal, undefined, root);
 		const limit = options.limit ?? 1000;
 		const parsed = parseRgJson(output.text, limit + 1, root);
 		const capped = capGroups(parsed, limit);
@@ -412,7 +421,11 @@ export async function searchContent(root: string, options: SearchOptions, signal
 		if (options.includeWorktrees && worktrees.length) {
 			const remaining = Math.max(1, limit - groups.reduce((sum, group) => sum + group.matches.length, 0));
 			const localOptions = { ...options, limit: remaining, includeWorktrees: true };
-			const local = await runRipgrep(makeRgArgs(root, localOptions, [], true, worktrees), signal);
+			const visibleWorktrees = options.showHidden === false
+				? worktrees.filter((worktree) => !path.relative(root, worktree).split(path.sep).some((part) => part.startsWith('.')))
+				: worktrees;
+			if (!visibleWorktrees.length) return mergeSearchResults(scans, limit);
+			const local = await runRipgrep(makeRgArgs(root, localOptions, [], true, visibleWorktrees), signal, undefined, root);
 			const parsedLocal = parseRgJson(local.text, remaining + 1, root);
 			const cappedLocal = capGroups(parsedLocal, remaining);
 			scans.push(Object.assign(cappedLocal.groups, { truncated: cappedLocal.truncated || local.truncated }));

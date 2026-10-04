@@ -30,6 +30,12 @@ export async function isGitRepo(repoPath: string): Promise<boolean> {
 	return stdout.trim() === 'true';
 }
 
+/** Finds the owning working tree, including nested repositories and worktrees. */
+export async function getGitRoot(target: string, isDirectory: boolean): Promise<string | null> {
+	const { stdout } = await runGit(isDirectory ? target : path.dirname(target), ['rev-parse', '--show-toplevel']);
+	return stdout.trim() ? path.resolve(stdout.trim()) : null;
+}
+
 /**
  * Returns all changed files in the repo according to `git status --porcelain -z`.
  * The NUL-separated format avoids quoting of non-ASCII/whitespace paths, and

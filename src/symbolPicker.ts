@@ -13,6 +13,7 @@ export class SymbolPicker extends SuggestModal<PhpSymbol> {
 	constructor(app: App, private lsp: PhpLsp, private filePath: string | undefined,
 		private select: (filePath: string, line: number, column: number) => void) {
 		super(app);
+		this.modalEl.addClass('so-symbol-picker');
 		this.setPlaceholder(filePath ? 'Go to symbol in file…' : 'Go to PHP symbol in workspace…');
 		this.setInstructions([{ command: '↑↓', purpose: 'Select' }, { command: '↵', purpose: 'Open symbol' }, { command: 'esc', purpose: 'Close' }]);
 	}

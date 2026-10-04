@@ -4,6 +4,16 @@ import { searchPreview } from './searchPreview';
 
 export type SearchSelection = (filePath: string, line?: number, column?: number) => void;
 
+export interface SearchPanelState {
+	query: string;
+	mode: 'content' | 'files';
+	caseSensitive: boolean;
+	wholeWord: boolean;
+	regex: boolean;
+	includeGlob: string;
+	excludeGlob: string;
+}
+
 /** Reusable VS Code-like full-text and file quick-open panel. */
 export class SearchPanel {
 	private container: HTMLElement;
@@ -17,6 +27,11 @@ export class SearchPanel {
 	private abortController: AbortController | null = null;
 	private queryInput!: HTMLInputElement;
 	private modeSelect!: HTMLSelectElement;
+	private caseInput!: HTMLInputElement;
+	private wholeWordInput!: HTMLInputElement;
+	private regexInput!: HTMLInputElement;
+	private includeInput!: HTMLInputElement;
+	private excludeInput!: HTMLInputElement;
 	private results!: HTMLElement;
 	private summary!: HTMLElement;
 	private caseSensitive = false;
@@ -38,9 +53,55 @@ export class SearchPanel {
 	}
 
 	setRoot(dir: string) {
-		if (this.rootPath === dir) return;
+		const changed = this.rootPath !== dir;
+		this.cancelPendingSearch();
 		this.rootPath = dir;
-		this.warmFiles();
+		this.results.empty();
+		this.summary.setText('');
+		this.results.setAttribute('aria-busy', 'false');
+		this.showMessage(dir ? 'Enter a search.' : 'Open a folder and enter a search.');
+		if (!dir) return;
+		if (changed) this.warmFiles();
+		this.scheduleSearch();
+	}
+
+	captureState(): SearchPanelState {
+		return {
+			query: this.queryInput.value,
+			mode: this.mode,
+			caseSensitive: this.caseSensitive,
+			wholeWord: this.wholeWord,
+			regex: this.regex,
+			includeGlob: this.includeGlob,
+			excludeGlob: this.excludeGlob,
+		};
+	}
+
+	restoreState(state: SearchPanelState | null) {
+		const next = state ?? {
+			query: '',
+			mode: 'content' as const,
+			caseSensitive: false,
+			wholeWord: false,
+			regex: false,
+			includeGlob: '',
+			excludeGlob: '',
+		};
+		this.queryInput.value = next.query;
+		this.mode = next.mode;
+		this.modeSelect.value = next.mode;
+		this.queryInput.placeholder = next.mode === 'content' ? 'Search in files' : 'Go to file';
+		this.caseSensitive = next.caseSensitive;
+		this.wholeWord = next.wholeWord;
+		this.regex = next.regex;
+		this.caseInput.checked = next.caseSensitive;
+		this.wholeWordInput.checked = next.wholeWord;
+		this.regexInput.checked = next.regex;
+		this.includeGlob = next.includeGlob;
+		this.excludeGlob = next.excludeGlob;
+		this.includeInput.value = next.includeGlob;
+		this.excludeInput.value = next.excludeGlob;
+		this.updateContentOptions();
 		this.scheduleSearch();
 	}
 
@@ -74,8 +135,7 @@ export class SearchPanel {
 
 	dispose() {
 		this.disposed = true;
-		if (this.debounceTimer !== null) window.clearTimeout(this.debounceTimer);
-		this.abortController?.abort();
+		this.cancelPendingSearch();
 	}
 
 	private warmFiles() {
@@ -107,9 +167,9 @@ export class SearchPanel {
 		});
 
 		const options = this.container.createDiv({ cls: 'so-search-options' });
-		this.addToggle(options, 'Match case', 'case', (value) => { this.caseSensitive = value; });
-		this.addToggle(options, 'Whole word', 'word', (value) => { this.wholeWord = value; });
-		this.addToggle(options, 'Use regular expression', 'regex', (value) => { this.regex = value; });
+		this.caseInput = this.addToggle(options, 'Match case', 'case', (value) => { this.caseSensitive = value; });
+		this.wholeWordInput = this.addToggle(options, 'Whole word', 'word', (value) => { this.wholeWord = value; });
+		this.regexInput = this.addToggle(options, 'Use regular expression', 'regex', (value) => { this.regex = value; });
 		const worktreeLabel = options.createEl('label', { cls: 'so-search-option' });
 		const worktree = worktreeLabel.createEl('input', { cls: 'so-search-worktrees', attr: { type: 'checkbox' } });
 		worktree.checked = this.includeWorktrees;
@@ -117,21 +177,22 @@ export class SearchPanel {
 		worktree.addEventListener('change', () => this.setIncludeWorktrees(worktree.checked));
 
 		const globs = this.container.createDiv({ cls: 'so-search-globs' });
-		const include = globs.createEl('input', { attr: { type: 'text', placeholder: 'Include files: **/*.ts', 'aria-label': 'Include globs' } });
-		const exclude = globs.createEl('input', { attr: { type: 'text', placeholder: 'Exclude files: **/*.test.ts', 'aria-label': 'Exclude globs' } });
-		include.addEventListener('input', () => { this.includeGlob = include.value; this.scheduleSearch(); });
-		exclude.addEventListener('input', () => { this.excludeGlob = exclude.value; this.scheduleSearch(); });
+		this.includeInput = globs.createEl('input', { attr: { type: 'text', placeholder: 'Include files: **/*.ts', 'aria-label': 'Include globs' } });
+		this.excludeInput = globs.createEl('input', { attr: { type: 'text', placeholder: 'Exclude files: **/*.test.ts', 'aria-label': 'Exclude globs' } });
+		this.includeInput.addEventListener('input', () => { this.includeGlob = this.includeInput.value; this.scheduleSearch(); });
+		this.excludeInput.addEventListener('input', () => { this.excludeGlob = this.excludeInput.value; this.scheduleSearch(); });
 		this.summary = this.container.createDiv({ cls: 'so-search-summary', attr: { role: 'status', 'aria-live': 'polite' } });
 		this.results = this.container.createDiv({ cls: 'so-search-results', attr: { role: 'list' } });
 		this.showMessage('Open a folder and enter a search.');
 	}
 
-	private addToggle(parent: HTMLElement, label: string, _key: string, onChange: (value: boolean) => void) {
+	private addToggle(parent: HTMLElement, label: string, _key: string, onChange: (value: boolean) => void): HTMLInputElement {
 		const wrapper = parent.createEl('label', { cls: 'so-search-option' });
 		const input = wrapper.createEl('input', { attr: { type: 'checkbox' } });
 		input.dataset.contentOption = 'true';
 		wrapper.createSpan({ text: label });
 		input.addEventListener('change', () => { onChange(input.checked); this.scheduleSearch(); });
+		return input;
 	}
 
 	private updateContentOptions() {
@@ -146,9 +207,20 @@ export class SearchPanel {
 		this.scheduledAt = performance.now();
 		if (this.debounceTimer !== null) window.clearTimeout(this.debounceTimer);
 		this.abortController?.abort();
+		this.abortController = null;
 		// Filename lookup uses a shared in-memory index. Content queries have a
 		// short pause to coalesce typing without adding a perceptible 150ms wait.
 		this.debounceTimer = window.setTimeout(() => { void this.search(); }, this.mode === 'files' ? 0 : 20);
+	}
+
+	private cancelPendingSearch() {
+		this.generation++;
+		if (this.debounceTimer !== null) {
+			window.clearTimeout(this.debounceTimer);
+			this.debounceTimer = null;
+		}
+		this.abortController?.abort();
+		this.abortController = null;
 	}
 
 	private async search() {

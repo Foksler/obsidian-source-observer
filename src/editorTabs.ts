@@ -2,6 +2,17 @@ import * as path from 'path';
 import { setIcon } from 'obsidian';
 
 export interface SourceTab { filePath: string; kind: 'code' | 'diff' }
+export interface EditorTabsState { tabs: SourceTab[]; active: SourceTab | null }
+
+function cloneTab(tab: SourceTab): SourceTab {
+	return { filePath: tab.filePath, kind: tab.kind };
+}
+
+/** Returns a plain serializable copy suitable for saving per-folder tabs. */
+export function cloneEditorTabsState(state: EditorTabsState | null): EditorTabsState {
+	if (!state) return { tabs: [], active: null };
+	return { tabs: state.tabs.map(cloneTab), active: state.active ? cloneTab(state.active) : null };
+}
 
 /** File tabs stay separate from the editor so LSP jumps use the same tab strip. */
 export class EditorTabs {
@@ -25,6 +36,22 @@ export class EditorTabs {
 	show(tab: SourceTab) {
 		if (!this.tabs.some((entry) => this.key(entry) === this.key(tab))) this.tabs.push(tab);
 		this.active = this.key(tab); this.render();
+	}
+	getActive(): SourceTab | null {
+		const active = this.tabs.find((entry) => this.key(entry) === this.active);
+		return active ? cloneTab(active) : null;
+	}
+	captureState(): EditorTabsState {
+		return cloneEditorTabsState({ tabs: this.tabs, active: this.getActive() });
+	}
+	restoreState(state: EditorTabsState | null): void {
+		const cloned = cloneEditorTabsState(state);
+		this.tabs = cloned.tabs;
+		const active = cloned.active;
+		this.active = active && this.tabs.some((tab) => this.key(tab) === this.key(active))
+			? this.key(active)
+			: '';
+		this.render();
 	}
 	closeActive() { const tab = this.tabs.find((entry) => this.key(entry) === this.active); if (tab) this.close(tab); }
 	reset() { this.tabs = []; this.active = ''; this.render(); }

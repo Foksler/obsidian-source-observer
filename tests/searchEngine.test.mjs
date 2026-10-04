@@ -194,4 +194,6 @@ test('Include worktrees bypasses ignored ancestors but keeps worktree-local igno
 	assert.deepEqual(quickOpen.map((file) => path.relative(root, file)), ['.claude/worktrees/predictions-master/included.txt']);
 	const fallback = await searchContentFallback(root, { query: 'parent-rule-token', includeWorktrees: true }, new AbortController().signal);
 	assert.deepEqual(fallback.map((group) => path.relative(root, group.filePath)).sort(), ['.claude/worktrees/predictions-master/included.txt', 'visible.txt']);
+	const scopedWorktree = await searchContent(root, { query: 'parent-rule-token', includeWorktrees: true, includeGlob: '.claude/worktrees/**', excludeGlob: '**/local-ignore.txt' }, new AbortController().signal);
+	assert.deepEqual(scopedWorktree.map((group) => path.relative(root, group.filePath)), ['.claude/worktrees/predictions-master/included.txt']);
 });

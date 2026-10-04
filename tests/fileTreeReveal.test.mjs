@@ -1,0 +1,110 @@
+import assert from 'node:assert/strict';
+import test from 'node:test';
+import { mkdtemp, mkdir, writeFile, rm } from 'node:fs/promises';
+import path from 'node:path';
+import os from 'node:os';
+import { build } from 'esbuild';
+
+const bundle = await build({ entryPoints: ['src/fileTree.ts'], bundle: true, platform: 'node', format: 'esm', write: false,
+ plugins: [{ name: 'tree-test', setup(api) {
+  api.onResolve({ filter: /^obsidian$/ }, () => ({ path: 'obsidian', namespace: 'shim' }));
+  api.onLoad({ filter: /.*/, namespace: 'shim' }, () => ({ contents: 'export function setIcon(element, name) { element.icon = name; }', loader: 'js' }));
+  api.onResolve({ filter: /^\.\/searchEngine$/ }, () => ({ path: 'search', namespace: 'search' }));
+  api.onLoad({ filter: /.*/, namespace: 'search' }, () => ({ contents: 'export async function getRegisteredWorktrees() { return []; }', loader: 'js' }));
+ } }] });
+const { FileTree } = await import(`data:text/javascript;base64,${Buffer.from(bundle.outputFiles[0].text).toString('base64')}`);
+class Element {
+ children = []; dataset = {}; attrs = {}; classes = new Set(); listeners = new Map();
+ constructor(options = {}, document = { activeElement: null }) { this.ownerDocument = document; for (const cls of (options.cls ?? '').split(' ')) this.classes.add(cls); }
+ setAttribute(key, value) { this.attrs[key] = value; }
+ setCssProps() {} addClass(cls) { this.classes.add(cls); } removeClass(cls) { this.classes.delete(cls); }
+ toggleClass(cls, on) { if (on) this.addClass(cls); else this.removeClass(cls); }
+ empty() { this.children = []; } addEventListener(key, fn) { this.listeners.set(key, fn); }
+ createDiv(options) { const child = new Element(options, this.ownerDocument); child.parent = this; this.children.push(child); return child; }
+ createSpan(options) { return this.createDiv(options); }
+ querySelectorAll(selector) { const cls = selector.slice(1); return this.children.flatMap(child => [...(child.classes.has(cls) ? [child] : []), ...child.querySelectorAll(selector)]); }
+ focus() { this.ownerDocument.activeElement = this; this.listeners.get('focus')?.(); }
+ scrollIntoView() { this.scrolled = true; }
+}
+async function setup(hidden = true) {
+ const root = await mkdtemp(path.join(os.tmpdir(), 'so-reveal-'));
+ await mkdir(path.join(root, 'src', 'nested'), { recursive: true });
+ const file = path.join(root, 'src', 'nested', 'Current.php');
+ await writeFile(file, '<?php');
+ const container = new Element(), opened = [];
+ const tree = new FileTree(container, hidden, file => opened.push(file));
+ await tree.loadPath(root);
+ return { root, file, container, tree, opened, async cleanup() { tree.dispose(); await rm(root, { recursive: true, force: true }); } };
+}
+
+test('Locate expands lazy ancestors, selects and scrolls the current file without reopening it', async () => {
+ const fixture = await setup();
+ try {
+  const { tree, file, container, opened } = fixture;
+  container.empty(); // A filtered list must be replaced with the directory tree.
+  assert.equal(await tree.reveal(file), true);
+  const rows = container.querySelectorAll('.so-tree-row');
+  assert.deepEqual(rows.map(row => row.dataset.path), [fixture.root, path.dirname(path.dirname(file)), path.dirname(file), file]);
+  assert.ok(rows.slice(0, -1).every(row => row.attrs['aria-expanded'] === 'true'));
+  const selected = rows.at(-1);
+  assert.equal(selected.attrs['aria-selected'], 'true');
+  assert.equal(container.ownerDocument.activeElement, selected);
+  assert.ok(selected.scrolled);
+  assert.deepEqual(tree.getSelectedPath(), { path: file, isDirectory: false });
+  assert.deepEqual(opened, []);
+ } finally { await fixture.cleanup(); }
+});
+
+test('Locate respects root boundaries, hidden files and excluded worktrees', async () => {
+ const fixture = await setup(false);
+ try {
+  const { tree, root } = fixture;
+  await writeFile(path.join(root, '.hidden.php'), '<?php');
+  await mkdir(path.join(root, 'worktrees'), { recursive: true });
+  await writeFile(path.join(root, 'worktrees', 'Other.php'), '<?php');
+  assert.equal(await tree.reveal(path.join(root, '..', 'outside.php')), false);
+  assert.equal(await tree.reveal(path.join(root, '.hidden.php')), false);
+  assert.equal(await tree.reveal(path.join(root, 'worktrees', 'Other.php')), false);
+  assert.equal(tree.getSelectedPath(), null);
+ } finally { await fixture.cleanup(); }
+});
+
+test('late Locate cannot select or replace the tree after switching folders', async () => {
+ const fixture = await setup();
+ try {
+  const { tree, root, file, container } = fixture;
+  const readDir = tree.readDir.bind(tree);
+  let resume;
+  tree.readDir = async (...args) => { if (args[0] === path.join(root, 'src')) await new Promise(resolve => { resume = resolve; }); return readDir(...args); };
+  const locating = tree.reveal(file);
+  await tree.loadPath(path.join(root, 'src', 'nested'));
+  resume();
+  assert.equal(await locating, false);
+  assert.equal(tree.getSelectedPath(), null);
+  assert.equal(container.querySelectorAll('.so-tree-row')[0].dataset.path, path.dirname(file));
+ } finally { await fixture.cleanup(); }
+});
+
+test('folder disclosure follows expansion and collapse without opening a file', async () => {
+ const fixture = await setup();
+ try {
+  const { tree, file, container, opened } = fixture;
+  await tree.reveal(file);
+  const rows = container.querySelectorAll('.so-tree-row');
+  const directory = rows[1];
+  const chevron = directory.querySelectorAll('.so-tree-chevron')[0];
+  const icon = directory.querySelectorAll('.so-tree-icon')[0];
+  assert.equal(chevron.icon, 'chevron-down');
+  assert.equal(icon.dataset.icon, 'folder-src-open');
+  directory.listeners.get('click')();
+  assert.equal(directory.attrs['aria-expanded'], 'false');
+  assert.equal(chevron.icon, 'chevron-right');
+  assert.equal(icon.dataset.icon, 'folder-src');
+  assert.ok(container.querySelectorAll('.so-tree-children')[1].classes.has('so-tree-children-hidden'));
+  directory.listeners.get('click')();
+  assert.equal(directory.attrs['aria-expanded'], 'true');
+  assert.equal(chevron.icon, 'chevron-down');
+  assert.equal(icon.dataset.icon, 'folder-src-open');
+  assert.deepEqual(opened, []);
+ } finally { await fixture.cleanup(); }
+});

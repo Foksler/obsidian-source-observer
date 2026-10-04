@@ -15,14 +15,17 @@ The original author's MIT licence and Git history are preserved.
 - **PHP navigation** — local Intelephense definitions, references, hover documentation and symbols
 - **Quick open** — search filenames and paths with fuzzy matching in a separate keyboard-driven picker
 - **Source tabs** — open multiple files and diffs, with cursor and scroll position restoration
+- **Folder tabs** — open several folders from the toolbar, switch between them above the file tree, and close a folder with its × button. Each folder keeps its own files, cursor positions, navigation history, and search while the view is open; the folder list and active folder also survive a restart.
 - **Git diff** — changed files listed in the sidebar with M/A/D badges and new/modified counts; click any file to see its diff or full content
 - **Collapsible sections** — Files and Changes panels collapse independently
 - **Search** — search content with regex and filters, or search filenames; worktrees are excluded by default and can be included
+- **Search modes** — keep the VS Code sidebar, or use PhpStorm-style Search Everywhere and Find in Files windows with a source preview
+- **Keyboard shortcuts** — record, clear or reset view shortcuts in the plugin settings
 
 ## Usage
 
 1. Click the `</>` icon in the ribbon or run **Open Source Observer** from the command palette
-2. Click **Open folder…** to select any directory on your machine
+2. Select the **folder+** icon in the toolbar to open one or more directories on your machine
 3. Browse files in the **Files** panel — click to open with syntax highlighting
 4. Switch to the **Changes** panel to see modified, added, and deleted files relative to git HEAD; click any file to view its diff
 5. Use **Ctrl+P** or **Ctrl+Shift+O** for quick open (**Cmd** on macOS); use **Ctrl+Shift+F** for content search
@@ -54,6 +57,80 @@ MIT
 
 ## Local code navigation
 
+Enable **Settings → Source observer → Replace Obsidian file explorer** to put
+source folders, folder tabs, search and Git changes in the left Files panel while
+Source Observer is active. Selecting its main tab or ribbon icon shows the source
+tree; switching to a note restores Obsidian's Files panel. Clicking within the
+sidebar keeps the current workspace context. Code and diffs open in the main tab.
+Switching the setting off, closing Source Observer or disabling the plugin restores
+Files. Moving the tree preserves open source files and folder state; the setting
+is off by default.
+
+**Changes** and its resize divider appear only for a Git working tree. Selecting a
+folder in the tree or opening a source file selects its owning repository, including
+nested repositories and Git worktrees. A non-Git selection hides the section.
+
+Choose **Settings → Source observer → Search mode**:
+
+- **VS Code** (default) keeps sidebar content search and the existing quick-open picker.
+- **PhpStorm** routes quick open and workspace search to a single modal. Press
+  **Shift twice** while Source Observer has focus, select the **Search everywhere**
+  toolbar button, or run the **Search everywhere** command. **All** searches files,
+  PHP symbols, the plugin's navigation actions and every text occurrence. Named
+  results and text matches share a compact list above a read-only source preview.
+  **Search filters** (or **F6**) reveals the folder scope and search options. **Search in**
+  selects all open folders or a specific folder; choosing a result switches to its
+  folder before opening the file. Overlapping folders do not duplicate matches.
+  Text totals cover the entire search, with **Load more** exposing results beyond
+  the first page. An empty **All** query shows
+  files opened during this view session. **Files**, **Classes**, **Symbols**,
+  **Actions** and **Text** narrow the search. **Tab / Shift+Tab** changes category,
+  **↑↓** or a single click previews a result; **Enter** or a double-click opens it.
+  **Esc** closes the window. The window has no close button.
+  **Ctrl+↑ / Ctrl+↓** jumps to the first or last result.
+  **Alt+↓ / Alt+↑** jumps to text or named results. The query, filters and
+  folder scope are retained when you reopen the window during this view session.
+  **Cmd/Ctrl+P** opens **Files**. **Cmd/Ctrl+Shift+F** opens a separate **Find in files** window.
+  Text supports match case, whole words, regex and include/exclude globs;
+  file lookup supports fuzzy names, CamelCase abbreviations and path filters.
+  The modal's worktree toggle applies to files and text for that window; PHP
+  indexing follows the plugin's **Include worktrees** setting. **Classes** and
+  **Symbols** require PHP language navigation. Document symbols continue using
+  the current-file picker. Results come from the selected folders and local PHP
+  server; the plugin makes no network requests for search. This implements the
+  source-navigation parts of Search Everywhere, without PhpStorm's Git,
+  calculator, global IDE settings or plugin-management providers.
+
+**Find in files** searches only the active folder tab. Its area tabs select
+**In Project** (the active folder), **Module** (a Composer project inside it),
+**Directory** (a selected directory, optionally recursive), or **Scope**
+(project files, open files, the current file or a custom path scope). When the
+file tree has focus, the shortcut starts in **Directory** using the selected
+folder or the selected file's parent. The directory remains editable, within
+the active folder. Include/exclude globs are relative to the selected search
+root; comma-separated file masks such as `*.php,*.ts` further restrict results.
+Match case, whole words, regex and worktree inclusion are available.
+The file mask sits in the window header. **Search filters** reveals the path
+filters and worktree toggle above the search field. Result snippets show syntax colors and highlighted
+matches; the preview header separates the filename from its relative directory.
+The **?** button beside **.*** opens a regular expression syntax reference with
+examples. Closing help restores the search field without changing the query.
+Click a row or use **↑↓** to inspect its source in the lower preview without
+changing the main file. **Enter** or a double-click opens the matching location.
+Drag the horizontal divider to resize results and preview in either search window;
+the divider also supports **↑↓** when focused.
+**Load more** reveals further results while the
+counter covers the entire search. Query and filter state are retained per
+folder while the view is open.
+
+Under **Settings → Source observer → Keyboard shortcuts**, select a shortcut
+field and press the desired combination. **Clear shortcut** removes it and
+**Restore default shortcut** restores its default; conflicting assignments are
+rejected. Changes apply immediately while Source Observer has focus, including
+search in the current file and history navigation in the code viewer.
+**Double shift search** can be disabled independently. Plugin commands can
+also receive global shortcuts in Obsidian's **Hotkeys** settings.
+
 This desktop plugin reads the folder you select outside the vault. Source files
 are read-only: navigation, search and diffs never save changes to the codebase.
 
@@ -64,7 +141,7 @@ are read-only: navigation, search and diffs never save changes to the codebase.
 - **Symbols:** Cmd+Alt+O lists the current PHP file's symbols. Cmd+T searches
   workspace PHP symbols, including Composer projects inside the selected folder.
   These actions are also available in the command palette and toolbar.
-- **Quick open:** Cmd+P or Cmd+Shift+O opens a separate file picker for the
+- **Quick open:** in VS Code mode, Cmd+P or Cmd+Shift+O opens a separate file picker for the
   selected folder, regardless of the current file or PHP navigation settings.
   On Windows/Linux use Ctrl instead of Cmd. Type a filename, abbreviation or
   path/name terms, use the arrow keys to select a result and Enter to open it;
@@ -90,9 +167,17 @@ are read-only: navigation, search and diffs never save changes to the codebase.
 - **Tabs:** source files and diffs have separate closable tabs; switching source
   tabs restores cursor and scroll positions. Long tab rows wrap.
   Arrow keys switch focused tabs.
+- **Locate:** the crosshair toolbar button **Locate current file in tree** reveals
+  the active source or diff file, expands its parent folders, clears the tree
+  filter and scrolls to the selected file. It is also available in **Actions**.
+- **Folder icons:** bundled Material Icon Theme artwork identifies common project
+  folders such as app, config, database, routes and tests. A right-pointing chevron
+  marks a collapsed folder; a downward chevron and open icon mark an expanded one.
 - **Git:** select **Hide Git changes** to reduce the panel to its header at the
   bottom of the sidebar; select **Restore Git changes** to expand it. The choice
-  persists across reloads.
+  persists across reloads. Drag the horizontal border above **Changes** to resize
+  the panel; it starts at its minimum height of 80px so Files uses the maximum
+  available space.
 - **Appearance:** Cursor Monokai Pro includes a PHP token palette,
   JetBrains Mono, ligatures, 15px text, four-space tabs and the 120-column ruler.
   Install JetBrains Mono locally for exact font rendering. CodeMirror uses a

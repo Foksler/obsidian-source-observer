@@ -138,6 +138,7 @@ function toFilePath(uri: string): string | null {
 
 /** Runs Intelephense per project and exposes read-only PHP navigation. */
 export class PhpLsp {
+	private disposed = false;
 	private servers = new Map<string, Server>();
 	private failed = new Set<string>();
 	private workspaceRootsCache = new Map<string, string[]>();
@@ -188,6 +189,7 @@ export class PhpLsp {
 	 * symbols for the configured root (optionally filtered by `query`).
 	 */
 	async symbols(query?: string, filePath?: string): Promise<PhpSymbol[]> {
+		if (this.disposed) return [];
 		if (filePath) {
 			const root = findComposerRoot(filePath) ?? (this.workspaceRoot && isWithin(filePath, this.workspaceRoot) ? this.workspaceRoot : null);
 			if (!root) return [];
@@ -208,6 +210,7 @@ export class PhpLsp {
 			let roots = this.workspaceRootsCache.get(workspaceRoot);
 			if (!roots) {
 				roots = await findWorkspaceComposerRoots(workspaceRoot, this.opts.includeWorktrees ?? false);
+				if (this.disposed) return [];
 				this.workspaceRootsCache.set(workspaceRoot, roots);
 			}
 			const projects = roots.length ? roots : [workspaceRoot];
@@ -327,6 +330,7 @@ export class PhpLsp {
 	}
 
 	private serverFor(root: string): Server | null {
+		if (this.disposed) return null;
 		const normalizedRoot = path.resolve(root);
 		const existing = this.servers.get(normalizedRoot);
 		if (existing) return existing;
@@ -415,6 +419,7 @@ export class PhpLsp {
 
 	/** Stops all language server processes and hides indexing notices on unload. */
 	dispose() {
+		this.disposed = true;
 		for (const [root, { client, proc, indexingNotice }] of this.servers) {
 			this.failed.add(root);
 			indexingNotice?.hide();

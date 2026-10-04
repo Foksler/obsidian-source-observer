@@ -1,12 +1,19 @@
-import { App, PluginSettingTab, Setting } from 'obsidian';
+import { App, Component, Notice, Platform, PluginSettingTab, Setting } from 'obsidian';
 import type SourceObserverPlugin from './main';
 import { detectIntelephense, detectNode } from './phpLsp';
+import type { SearchMode } from './searchMode';
+import { DEFAULT_SHORTCUTS, SHORTCUT_ACTIONS, shortcutFromEvent, shortcutLabel, sameShortcut, type SearchShortcuts, type ShortcutAction } from './searchShortcuts';
 
 export type SyntaxTheme = 'obsidian' | 'cursor-monokai' | 'dark-plus' | 'one-dark';
 
 /** Persisted plugin settings stored in `data.json`. */
 export interface SourceObserverSettings {
+	replaceFileExplorer: boolean;
+	searchMode: SearchMode;
+	shortcuts: SearchShortcuts;
+	doubleShiftSearch: boolean;
 	lastOpenedPath: string;
+	openedFolderPaths: string[] | null;
 	fontSize: number;
 	editorFontFamily: string;
 	editorFontLigatures: boolean;
@@ -21,7 +28,12 @@ export interface SourceObserverSettings {
 }
 
 export const DEFAULT_SETTINGS: SourceObserverSettings = {
+	replaceFileExplorer: false,
+	searchMode: 'vscode',
+	shortcuts: DEFAULT_SHORTCUTS,
+	doubleShiftSearch: true,
 	lastOpenedPath: '',
+	openedFolderPaths: null,
 	fontSize: 15,
 	editorFontFamily: 'JetBrains Mono',
 	editorFontLigatures: true,
@@ -38,15 +50,74 @@ export const DEFAULT_SETTINGS: SourceObserverSettings = {
 /** Obsidian settings tab for configuring font size and hidden-file visibility. */
 export class SourceObserverSettingTab extends PluginSettingTab {
 	plugin: SourceObserverPlugin;
+	private shortcutListeners = new Component();
 
 	constructor(app: App, plugin: SourceObserverPlugin) {
 		super(app, plugin);
 		this.plugin = plugin;
+		plugin.register(() => this.shortcutListeners.unload());
 	}
 
 	display(): void {
 		const { containerEl } = this;
+		this.shortcutListeners.unload(); this.shortcutListeners.load();
 		containerEl.empty();
+
+		new Setting(containerEl)
+			.setName('Replace Obsidian file explorer')
+			.setDesc('Show source folders in the left files panel while the source observer tab is active. Switching to a note restores Obsidian files. Code and diffs stay in the main tab.')
+			.addToggle((toggle) => toggle.setValue(this.plugin.settings.replaceFileExplorer).onChange(async (value) => {
+				this.plugin.settings.replaceFileExplorer = value;
+				await this.plugin.saveSettings();
+			}));
+
+		new Setting(containerEl)
+			.setName('Search mode')
+			.setDesc('Choose sidebar search or a search everywhere modal. In modal mode, press shift twice while the source view has focus.')
+			.addDropdown((dropdown) => dropdown
+				.addOptions({ vscode: 'VS Code', phpstorm: 'PhpStorm' })
+				.setValue(this.plugin.settings.searchMode)
+				.onChange(async (value) => {
+					this.plugin.settings.searchMode = value === 'phpstorm' ? 'phpstorm' : 'vscode';
+					await this.plugin.saveSettings();
+				}));
+
+		new Setting(containerEl)
+			.setName('Double shift search')
+			.setDesc('Open search everywhere with two shift taps in modal search mode.')
+			.addToggle((toggle) => toggle.setValue(this.plugin.settings.doubleShiftSearch).onChange(async (value) => {
+				this.plugin.settings.doubleShiftSearch = value; await this.plugin.saveSettings();
+			}));
+
+		new Setting(containerEl).setName('Keyboard shortcuts').setDesc('Click a shortcut field and press a key combination. These shortcuts apply while the source view has focus. Commands are also available in Obsidian hotkeys.').setHeading();
+		for (const action of Object.keys(SHORTCUT_ACTIONS) as ShortcutAction[]) {
+			const setting = new Setting(containerEl).setName(SHORTCUT_ACTIONS[action]);
+			setting.addText((input) => {
+				input.inputEl.readOnly = true;
+				input.inputEl.setAttribute('aria-label', `${SHORTCUT_ACTIONS[action]} shortcut`);
+				input.setValue(shortcutLabel(this.plugin.settings.shortcuts[action], Platform.isMacOS));
+				this.shortcutListeners.registerDomEvent(input.inputEl, 'keydown', (event) => {
+					if (event.key === 'Tab') return;
+					event.preventDefault(); event.stopPropagation();
+					if (event.key === 'Escape') { input.inputEl.blur(); return; }
+					const shortcut = shortcutFromEvent(event, Platform.isMacOS); if (!shortcut) return;
+					const conflict = (Object.keys(SHORTCUT_ACTIONS) as ShortcutAction[]).find((key) => key !== action && sameShortcut(shortcut, this.plugin.settings.shortcuts[key]));
+					if (conflict) { new Notice(`This shortcut is assigned to ${SHORTCUT_ACTIONS[conflict]}. Clear it first.`); return; }
+					this.plugin.settings.shortcuts[action] = shortcut;
+					input.setValue(shortcutLabel(shortcut, Platform.isMacOS));
+					void this.plugin.saveSettings();
+				});
+			});
+			setting.addExtraButton((button) => button.setIcon('x').setTooltip('Clear shortcut').onClick(async () => {
+				this.plugin.settings.shortcuts[action] = null; await this.plugin.saveSettings(); this.display();
+			}));
+			setting.addExtraButton((button) => button.setIcon('reset').setTooltip('Restore default shortcut').onClick(async () => {
+				const shortcut = DEFAULT_SHORTCUTS[action];
+				const conflict = (Object.keys(SHORTCUT_ACTIONS) as ShortcutAction[]).find((key) => key !== action && sameShortcut(shortcut, this.plugin.settings.shortcuts[key]));
+				if (conflict) { new Notice(`This shortcut is assigned to ${SHORTCUT_ACTIONS[conflict]}. Clear it first.`); return; }
+				this.plugin.settings.shortcuts[action] = shortcut; await this.plugin.saveSettings(); this.display();
+			}));
+		}
 
 		new Setting(containerEl)
 			.setName('Font size')

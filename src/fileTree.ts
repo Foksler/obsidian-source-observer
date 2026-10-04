@@ -1,6 +1,7 @@
 import { promises as fsp } from 'fs';
 import * as path from 'path';
 import { setIcon } from 'obsidian';
+import { setFolderIcon } from './folderIcons';
 import { getRegisteredWorktrees } from './searchEngine';
 import { FILE_SEARCH_RESULTS_CAP, searchFilePathIndex } from './filePathIndex.ts';
 
@@ -75,15 +76,21 @@ export class FileTree {
 	private rootPath = '';
 	private treeRoot: TreeNode | null = null;
 	private searchSeq = 0;
+	private loadSeq = 0;
+	private disposed = false;
 	private includeWorktrees = false;
 	private worktreeRoots: string[] | null = null;
+	private selectedPath: { path: string; isDirectory: boolean } | null = null;
 
 	constructor(
 		container: HTMLElement,
 		showHidden: boolean,
 		onSelect: (filePath: string) => void,
+		private onPathSelect?: (selection: { path: string; isDirectory: boolean }) => void,
 	) {
 		this.container = container;
+		container.setAttribute('role', 'tree');
+		container.setAttribute('aria-label', 'Source files');
 		this.showHidden = showHidden;
 		this.onSelect = onSelect;
 	}
@@ -106,19 +113,107 @@ export class FileTree {
 
 	/** Loads `dirPath` as the new root and re-renders the tree. */
 	async loadPath(dirPath: string) {
+		const seq = ++this.loadSeq;
+		this.searchSeq++;
+		if (dirPath !== this.rootPath) this.selectedPath = null;
 		this.rootPath = dirPath;
-		this.worktreeRoots = await this.normalizeWorktreeRoots(
-			dirPath,
-			await getRegisteredWorktrees(dirPath),
-		);
-		this.treeRoot = await this.buildNode(dirPath, true);
+		this.treeRoot = null;
+		this.worktreeRoots = [];
+		this.container.empty();
+		if (!dirPath || this.disposed) return;
+		const discoveredWorktrees = await getRegisteredWorktrees(dirPath);
+		if (seq !== this.loadSeq || this.disposed) return;
+		this.worktreeRoots = await this.normalizeWorktreeRoots(dirPath, discoveredWorktrees);
+		if (seq !== this.loadSeq || this.disposed) return;
+		const treeRoot = await this.buildNode(dirPath, true, seq);
+		if (!treeRoot || seq !== this.loadSeq || this.disposed) return;
+		this.treeRoot = treeRoot;
 		this.renderTree();
+	}
+
+	getSelectedPath() { return this.selectedPath ? { ...this.selectedPath } : null; }
+	hasFocus() { return this.container.contains(this.container.ownerDocument.activeElement); }
+
+	/** Reveal the current file without opening it again or changing the editor. */
+	async reveal(filePath: string): Promise<boolean> {
+		let node = this.treeRoot;
+		if (!node || this.disposed) return false;
+		const target = path.resolve(filePath), relative = path.relative(this.rootPath, target);
+		if (!relative || relative === '..' || relative.startsWith(`..${path.sep}`) || path.isAbsolute(relative)) return false;
+		const generation = this.loadSeq, request = ++this.searchSeq;
+		const current = () => !this.disposed && generation === this.loadSeq && request === this.searchSeq;
+		const ancestors: TreeNode[] = [];
+		for (const part of relative.split(path.sep)) {
+			if (!node.isDir) return false;
+			ancestors.push(node);
+			if (!node.children?.some((child) => child.name === part)) {
+				const children = await this.readDir(node.fullPath, generation);
+				if (!current()) return false;
+				node.children = children;
+			}
+			const child: TreeNode | undefined = node.children?.find((entry) => entry.name === part);
+			if (!child) return false;
+			node = child;
+		}
+		if (!current() || node.isDir) return false;
+		for (const ancestor of ancestors) ancestor.expanded = true;
+		this.selectedPath = { path: target, isDirectory: false };
+		this.renderTree();
+		const row = Array.from(this.container.querySelectorAll<HTMLElement>('.so-tree-row')).find((item) => item.dataset.path === target);
+		row?.focus({ preventScroll: true });
+		row?.scrollIntoView({ block: 'nearest' });
+		return !!row;
+	}
+
+	private prepareRow(row: HTMLElement, filePath: string, isDirectory: boolean) {
+		row.dataset.path = filePath; row.dataset.directory = String(isDirectory);
+		row.setAttribute('role', 'treeitem');
+		row.setAttribute('aria-selected', String(this.selectedPath?.path === filePath));
+		row.tabIndex = this.selectedPath?.path === filePath || (!this.selectedPath && filePath === this.rootPath) ? 0 : -1;
+		row.toggleClass('so-tree-row-active', this.selectedPath?.path === filePath);
+		const select = () => {
+			const changed = this.selectedPath?.path !== filePath;
+			this.selectedPath = { path: filePath, isDirectory };
+			for (const item of Array.from(this.container.querySelectorAll<HTMLElement>('.so-tree-row'))) {
+				item.toggleClass('so-tree-row-active', item === row); item.tabIndex = item === row ? 0 : -1;
+				item.setAttribute('aria-selected', String(item === row));
+			}
+			if (changed) this.onPathSelect?.({ ...this.selectedPath });
+		};
+		row.addEventListener('focus', select);
+		row.addEventListener('click', () => { select(); row.focus(); });
+		row.addEventListener('keydown', (event) => {
+			if (event.ctrlKey || event.metaKey || event.altKey || event.shiftKey) return;
+			const rows = Array.from(this.container.querySelectorAll<HTMLElement>('.so-tree-row')).filter((item) => !item.closest('.so-tree-children-hidden'));
+			const index = rows.indexOf(row);
+			if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+				event.preventDefault(); rows[Math.max(0, Math.min(rows.length - 1, index + (event.key === 'ArrowDown' ? 1 : -1)))]?.focus();
+			} else if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); row.click(); }
+			else if (event.key === 'ArrowRight' && isDirectory) {
+				event.preventDefault(); if (row.getAttribute('aria-expanded') !== 'true') row.click(); else rows[index + 1]?.focus();
+			} else if (event.key === 'ArrowLeft') {
+				event.preventDefault(); if (isDirectory && row.getAttribute('aria-expanded') === 'true') row.click();
+				else rows.find((item) => item.dataset.path === path.dirname(filePath))?.focus();
+			}
+		});
+	}
+
+	dispose() {
+		this.disposed = true;
+		this.loadSeq++;
+		this.searchSeq++;
+		this.container.empty();
 	}
 
 	/** Filters the tree to files whose name contains `query`; clears filter when query is empty. */
 	async search(query: string) {
 		const seq = ++this.searchSeq;
+		if (this.disposed) return;
 		this.container.empty();
+		if (!this.rootPath) {
+			this.container.createEl('span', { cls: 'so-search-empty', text: 'Open a folder first.' });
+			return;
+		}
 		if (query.length === 0) {
 			if (this.treeRoot) this.renderNode(this.treeRoot, this.container, 0);
 			return;
@@ -131,7 +226,7 @@ export class FileTree {
 			worktreeRoots: this.worktreeRoots ?? [],
 		});
 		// A newer keystroke already replaced the list — drop stale results.
-		if (seq !== this.searchSeq) return;
+		if (seq !== this.searchSeq || this.disposed) return;
 		this.container.empty();
 		if (matches.length === 0) {
 			this.container.createEl('span', { cls: 'so-search-empty', text: 'No results' });
@@ -140,7 +235,9 @@ export class FileTree {
 		for (const fullPath of matches) {
 			const rel = path.relative(this.rootPath, fullPath);
 			const row = this.container.createDiv({ cls: 'so-tree-row so-tree-file' });
+			this.prepareRow(row, fullPath, false);
 			row.setCssProps({ '--so-indent': '6px' });
+			row.createSpan({ cls: 'so-tree-chevron', attr: { 'aria-hidden': 'true' } });
 			const iconEl = row.createSpan({ cls: 'so-tree-icon' });
 			const [icon, cls] = fileIcon(path.basename(fullPath));
 			setIcon(iconEl, icon);
@@ -190,28 +287,37 @@ export class FileTree {
 		if (this.treeRoot) this.renderNode(this.treeRoot, this.container, 0);
 	}
 
-	private async buildNode(fullPath: string, expanded = false): Promise<TreeNode> {
+	private async buildNode(fullPath: string, expanded = false, generation = this.loadSeq): Promise<TreeNode | null> {
+		if (generation !== this.loadSeq || this.disposed) return null;
 		const name = path.basename(fullPath) || fullPath;
 		let isDir = false;
 		try {
 			const stat = await fsp.lstat(fullPath);
+			if (generation !== this.loadSeq || this.disposed) return null;
 			if (stat.isSymbolicLink()) return { name, fullPath, isDir: false };
 			isDir = stat.isDirectory();
-		} catch { return { name, fullPath, isDir: false }; }
+		} catch {
+			if (generation !== this.loadSeq || this.disposed) return null;
+			return { name, fullPath, isDir: false };
+		}
 		const node: TreeNode = { name, fullPath, isDir, expanded };
-		if (isDir && expanded) node.children = await this.readDir(fullPath);
+		if (isDir && expanded) node.children = await this.readDir(fullPath, generation);
 		return node;
 	}
 
-	private async readDir(dirPath: string): Promise<TreeNode[]> {
+	private async readDir(dirPath: string, generation = this.loadSeq): Promise<TreeNode[]> {
+		if (generation !== this.loadSeq || this.disposed) return [];
 		if (!this.includeWorktrees && this.isWorktreePath(dirPath)) return [];
 		let entries: string[];
 		try { entries = await fsp.readdir(dirPath); } catch { return []; }
+		if (generation !== this.loadSeq || this.disposed) return [];
 		if (!this.showHidden) entries = entries.filter((e) => !e.startsWith('.'));
 		const visibleEntries = this.includeWorktrees
 			? entries
 			: entries.filter((name) => !this.isWorktreePath(path.join(dirPath, name)));
-		const nodes = await Promise.all(visibleEntries.map((name) => this.buildNode(path.join(dirPath, name))));
+		const loadedNodes = await Promise.all(visibleEntries.map((name) => this.buildNode(path.join(dirPath, name), false, generation)));
+		const nodes = loadedNodes.filter((node): node is TreeNode => node !== null);
+		if (generation !== this.loadSeq || this.disposed) return [];
 		return nodes.sort((a, b) => {
 			if (a.isDir !== b.isDir) return a.isDir ? -1 : 1;
 			return a.name.localeCompare(b.name);
@@ -220,14 +326,17 @@ export class FileTree {
 
 	private renderNode(node: TreeNode, parent: HTMLElement, depth: number) {
 		const row = parent.createDiv({ cls: 'so-tree-row' });
+		this.prepareRow(row, node.fullPath, node.isDir);
 		row.setCssProps({ '--so-indent': `${depth * 14 + 6}px` });
 
-		const iconEl = row.createSpan({ cls: 'so-tree-icon' });
+		const chevron = row.createSpan({ cls: 'so-tree-chevron', attr: { 'aria-hidden': 'true' } });
+		const iconEl = row.createSpan({ cls: 'so-tree-icon', attr: { 'aria-hidden': 'true' } });
 
 		if (node.isDir) {
+			row.setAttribute('aria-expanded', String(!!node.expanded));
 			row.addClass('so-tree-dir');
-			setIcon(iconEl, node.expanded ? 'folder-open' : 'folder');
-			iconEl.addClass('so-icon-folder');
+			setIcon(chevron, node.expanded ? 'chevron-down' : 'chevron-right');
+			setFolderIcon(iconEl, node.name, !!node.expanded);
 			row.createSpan({ cls: 'so-tree-label', text: node.name });
 
 			const childContainer = parent.createDiv({ cls: 'so-tree-children' });
@@ -238,12 +347,15 @@ export class FileTree {
 
 			row.addEventListener('click', () => {
 				node.expanded = !node.expanded;
-				iconEl.empty();
-				setIcon(iconEl, node.expanded ? 'folder-open' : 'folder');
+				row.setAttribute('aria-expanded', String(node.expanded));
+				setIcon(chevron, node.expanded ? 'chevron-down' : 'chevron-right');
+				setFolderIcon(iconEl, node.name, node.expanded);
 				if (node.expanded) {
 					childContainer.removeClass('so-tree-children-hidden');
 					if (!node.children) {
-						void this.readDir(node.fullPath).then((children) => {
+						const generation = this.loadSeq;
+						void this.readDir(node.fullPath, generation).then((children) => {
+							if (generation !== this.loadSeq || this.disposed) return;
 							node.children = children;
 							childContainer.empty();
 							for (const child of children) this.renderNode(child, childContainer, depth + 1);

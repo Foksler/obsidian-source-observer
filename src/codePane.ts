@@ -16,6 +16,7 @@ import { html } from '@codemirror/lang-html';
 import { json } from '@codemirror/lang-json';
 import { markdown } from '@codemirror/lang-markdown';
 import { isPhpFile } from './phpFiles';
+import { normalizeShortcuts, type SearchShortcuts } from './searchShortcuts';
 
 const EXT_LANG: Record<string, () => ReturnType<typeof javascript>> = {
 	js:   () => javascript(),
@@ -74,9 +75,34 @@ export interface EditorLocation {
 	scrollTop: number;
 }
 
-interface SavedFileLocation {
+export interface CodePaneSessionLocation {
+	filePath: string;
 	pos: number;
 	scrollTop: number;
+}
+
+export interface CodePaneSession {
+	currentPath: string | null;
+	currentLocation: CodePaneSessionLocation | null;
+	fileLocations: CodePaneSessionLocation[];
+	history: CodePaneSessionLocation[];
+	forwardHistory: CodePaneSessionLocation[];
+}
+
+function cloneSessionLocation(location: CodePaneSessionLocation): CodePaneSessionLocation {
+	return { filePath: location.filePath, pos: location.pos, scrollTop: location.scrollTop };
+}
+
+/** Returns a plain serializable copy without sharing mutable arrays or entries. */
+export function cloneCodePaneSession(session: CodePaneSession | null): CodePaneSession {
+	if (!session) return { currentPath: null, currentLocation: null, fileLocations: [], history: [], forwardHistory: [] };
+	return {
+		currentPath: session.currentPath,
+		currentLocation: session.currentLocation ? cloneSessionLocation(session.currentLocation) : null,
+		fileLocations: session.fileLocations.map(cloneSessionLocation),
+		history: session.history.map(cloneSessionLocation),
+		forwardHistory: session.forwardHistory.map(cloneSessionLocation),
+	};
 }
 
 /**
@@ -96,9 +122,11 @@ export class CodePane {
 	private themeName: SyntaxTheme;
 	private lspSlot = new Compartment();
 	private lsp: PhpLsp | null = null;
+	private shortcutConfig = normalizeShortcuts(undefined);
+	private shortcuts = new Compartment();
 	private currentPath: string | null = null;
 	private openRequestId = 0;
-	private fileLocations = new Map<string, SavedFileLocation>();
+	private fileLocations = new Map<string, CodePaneSessionLocation>();
 	/** Positions to return to with Mod-[ after jumping to a definition. */
 	private history: { filePath: string; pos: number; scrollTop: number }[] = [];
 	private onShown: (filePath: string) => void;
@@ -140,7 +168,7 @@ export class CodePane {
 		if (this.currentPath && this.view) {
 			this.forwardHistory.push({ filePath: this.currentPath, pos: this.view.state.selection.main.head, scrollTop: this.view.scrollDOM.scrollTop });
 		}
-		if (prev.filePath !== this.currentPath) await this.open(prev.filePath);
+		if (prev.filePath !== this.currentPath && !await this.open(prev.filePath)) return false;
 		if (!this.view || this.currentPath !== prev.filePath) return false;
 		this.view.dispatch({ selection: { anchor: Math.min(prev.pos, this.view.state.doc.length) }, scrollIntoView: true });
 		this.view.scrollDOM.scrollTop = prev.scrollTop;
@@ -149,6 +177,37 @@ export class CodePane {
 
 	getCurrentFile(): string | null {
 		return this.currentPath;
+	}
+
+	/** Captures serializable per-file positions and navigation history without sharing state. */
+	captureSession(): CodePaneSession {
+		if (this.view && this.currentPath) {
+			this.fileLocations.set(this.currentPath, {
+				filePath: this.currentPath,
+				pos: this.view.state.selection.main.head,
+				scrollTop: this.view.scrollDOM.scrollTop,
+			});
+		}
+		const currentLocation = this.currentPath ? this.fileLocations.get(this.currentPath) ?? null : null;
+		return cloneCodePaneSession({
+			currentPath: this.currentPath,
+			currentLocation,
+			fileLocations: [...this.fileLocations.values()],
+			history: this.history,
+			forwardHistory: this.forwardHistory,
+		});
+	}
+
+	/** Replaces this pane's navigation state without opening a file. */
+	restoreSession(session: CodePaneSession | null): void {
+		this.suspend();
+		const cloned = cloneCodePaneSession(session);
+		this.fileLocations.clear();
+		for (const location of cloned.fileLocations) this.fileLocations.set(location.filePath, location);
+		if (cloned.currentLocation) this.fileLocations.set(cloned.currentLocation.filePath, cloned.currentLocation);
+		this.history = cloned.history;
+		this.forwardHistory = cloned.forwardHistory;
+		this.currentPath = cloned.currentPath;
 	}
 
 	getEditor(): EditorView | null {
@@ -172,7 +231,7 @@ export class CodePane {
 	}
 
 	async restoreLocation(location: EditorLocation): Promise<boolean> {
-		await this.open(location.filePath);
+		if (!await this.open(location.filePath)) return false;
 		if (!this.view || this.currentPath !== location.filePath) return false;
 		this.selectLocation(location);
 		this.view.scrollDOM.scrollTop = location.scrollTop;
@@ -181,6 +240,24 @@ export class CodePane {
 
 	findInFile(): void {
 		if (this.view) openSearchPanel(this.view);
+	}
+
+	setShortcuts(shortcuts: SearchShortcuts) {
+		this.shortcutConfig = normalizeShortcuts(shortcuts);
+		this.view?.dispatch({ effects: this.shortcuts.reconfigure(keymap.of(this.editorBindings())) });
+	}
+
+	private editorBindings() {
+		const bindings = searchKeymap.filter((binding) => binding.key !== 'Mod-f');
+		for (const [action, run] of [
+			['findInFile', (view: EditorView) => openSearchPanel(view)],
+			['back', () => { void this.goBack(); return true; }],
+			['forward', () => { void this.goForward(); return true; }],
+		] as const) {
+			const shortcut = this.shortcutConfig[action];
+			if (shortcut) bindings.push({ key: [...shortcut.modifiers, shortcut.key].join('-'), run });
+		}
+		return bindings;
 	}
 
 	/** Opens a file and selects a one-based line/column range. */
@@ -218,6 +295,7 @@ export class CodePane {
 		const lspExtension = this.lsp?.extensionFor(filePath) ?? [];
 		if (this.view && this.currentPath) {
 			this.fileLocations.set(this.currentPath, {
+				filePath: this.currentPath,
 				pos: this.view.state.selection.main.head,
 				scrollTop: this.view.scrollDOM.scrollTop,
 			});
@@ -242,12 +320,7 @@ export class CodePane {
 					this.language.of(langExtension),
 					Prec.highest(this.font.of(fontTheme(this.fontSize, this.fontFamily, this.fontLigatures))),
 					search(),
-					keymap.of([
-						{ key: 'Mod-f', run: (view) => openSearchPanel(view) },
-						{ key: 'Mod-[', run: () => { void this.goBack(); return true; } },
-						{ key: 'Mod-]', run: () => { void this.goForward(); return true; } },
-						...searchKeymap,
-					]),
+					this.shortcuts.of(keymap.of(this.editorBindings())),
 					this.lspSlot.of(lspExtension),
 				],
 			});
@@ -269,7 +342,7 @@ export class CodePane {
 		return this.view;
 	}
 
-	private restoreSavedFileLocation(location: SavedFileLocation | undefined) {
+	private restoreSavedFileLocation(location: CodePaneSessionLocation | undefined) {
 		if (!this.view) return;
 		if (location) {
 			this.view.dispatch({
@@ -290,7 +363,7 @@ export class CodePane {
 		if (this.currentPath && this.view) {
 			this.history.push({ filePath: this.currentPath, pos: this.view.state.selection.main.head, scrollTop: this.view.scrollDOM.scrollTop });
 		}
-		if (next.filePath !== this.currentPath) await this.open(next.filePath);
+		if (next.filePath !== this.currentPath && !await this.open(next.filePath)) return false;
 		if (!this.view || this.currentPath !== next.filePath) return false;
 		this.view.dispatch({ selection: { anchor: Math.min(next.pos, this.view.state.doc.length) }, scrollIntoView: true });
 		this.view.scrollDOM.scrollTop = next.scrollTop;
@@ -323,6 +396,7 @@ export class CodePane {
 		this.openRequestId++;
 		if (this.view && this.currentPath) {
 			this.fileLocations.set(this.currentPath, {
+				filePath: this.currentPath,
 				pos: this.view.state.selection.main.head,
 				scrollTop: this.view.scrollDOM.scrollTop,
 			});

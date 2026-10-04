@@ -2,6 +2,7 @@ import { promises as fsp, realpathSync } from 'fs';
 import * as path from 'path';
 import { runRipgrep } from './rgRunner.ts';
 import { createFileMatcher } from './fileSearchMatching.ts';
+import { inventoryFilePaths } from './fileInventory.ts';
 
 const INDEX_TTL_MS = 5_000;
 const MAX_INDEXED_FILES = 250_000;
@@ -12,6 +13,7 @@ const ALWAYS_EXCLUDED_DIRS = new Set(['.git', '.obsidian', 'node_modules']);
 const CONVENTIONAL_WORKTREE_PATHS = ['.claude/worktrees', '.worktrees', 'worktrees'];
 
 export interface FilePathSearchOptions {
+	signal?: AbortSignal;
 	includeWorktrees?: boolean;
 	showHidden?: boolean;
 	includeGlob?: string;
@@ -23,6 +25,7 @@ export interface FilePathSearchOptions {
 
 export interface FilePathSearchResult {
 	files: string[];
+	total?: number;
 	truncated: boolean;
 	indexedFiles: number;
 	indexBuildMs: number;
@@ -257,6 +260,26 @@ export async function searchFilePathIndex(
 	const limit = options.limit ?? FILE_SEARCH_RESULTS_CAP;
 	const found: string[] = [];
 	const ranked: Array<{ filePath: string; score: number }> = [];
+	if (entry.truncated) {
+		// Keep the shared index bounded, but search the full inventory when it overflowed.
+		let total = 0;
+		const compare = (a: { filePath: string; score: number }, b: { filePath: string; score: number }) =>
+			b.score - a.score || (a.filePath < b.filePath ? -1 : a.filePath > b.filePath ? 1 : 0);
+		await inventoryFilePaths(root, includeWorktrees, options.worktreeRoots ?? [], options.signal ?? new AbortController().signal,
+			(filePath, relative) => {
+				if (options.showHidden === false && /(?:^|\/)\./.test(relative)) return;
+				if (includes.length && !includes.some((glob) => glob.test(relative))) return;
+				if (excludes.some((glob) => glob.test(relative))) return;
+				const score = fuzzy ? (hasQuery ? match!(relative) : 0) : (needle && relative.toLowerCase().includes(needle) ? 0 : null);
+				if (score === null) return;
+				total++;
+				ranked.push({ filePath, score });
+				if (ranked.length >= Math.max(2, limit * 2)) { ranked.sort(compare); ranked.length = limit; }
+			});
+		ranked.sort(compare);
+		return { files: ranked.slice(0, limit).map((item) => item.filePath), total, truncated: total > limit,
+			indexedFiles: entry.files.length, indexBuildMs: entry.buildDurationMs };
+	}
 	for (let index = 0; index < entry.files.length; index++) {
 		const filePath = entry.files[index];
 		const relative = entry.relativePaths[index];
@@ -279,6 +302,7 @@ export async function searchFilePathIndex(
 	}
 	return {
 		files: found.slice(0, limit),
+		total: !entry.truncated && (fuzzy || found.length <= limit) ? (fuzzy ? ranked.length : found.length) : undefined,
 		truncated: found.length > limit || entry.truncated,
 		indexedFiles: entry.files.length,
 		indexBuildMs: entry.buildDurationMs,
