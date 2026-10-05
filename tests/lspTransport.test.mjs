@@ -15,6 +15,20 @@ function fakeProcess({ exitCode = null, killed = false } = {}) {
 }
 
 describe('LSP stdio framing', () => {
+	it('answers the selected adapter configuration and leaves other sections empty', async () => {
+		const proc = fakeProcess();
+		const transport = stdioTransport(proc, async () => ({ directoryFilters: ['-**/worktrees'] }), 'gopls');
+		const received = [];
+		transport.subscribe((message) => received.push(message));
+		proc.stdout.write(encodeLspMessage(JSON.stringify({ jsonrpc: '2.0', id: 4, method: 'workspace/configuration',
+			params: { items: [{ section: 'gopls' }, { section: 'intelephense' }, {}] } })));
+		await new Promise((resolve) => setImmediate(resolve));
+		const { messages } = takeLspMessages(proc.stdin.read());
+		assert.deepEqual(JSON.parse(messages[0]).result, [{ directoryFilters: ['-**/worktrees'] }, null, { directoryFilters: ['-**/worktrees'] }]);
+		assert.deepEqual(received, []);
+		proc.stdin.destroy(); proc.stdout.destroy(); proc.stderr.destroy();
+	});
+
 	it('uses UTF-8 byte length rather than JavaScript character count', () => {
 		const encoded = encodeLspMessage('{"text":"λ🙂"}');
 		const separator = encoded.indexOf('\r\n\r\n');

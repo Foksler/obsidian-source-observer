@@ -3,9 +3,10 @@ import { existsSync, realpathSync } from 'fs';
 import { promises as fsp } from 'fs';
 import * as path from 'path';
 import { promisify } from 'util';
+import { isPhpFile } from './phpFiles.ts';
 
 const execFileAsync = promisify(execFile);
-const EXCLUDED_DIRECTORY_NAMES = new Set(['.git', '.svn', '.hg', 'CVS', 'node_modules', 'bower_components', 'vendor']);
+const EXCLUDED_DIRECTORY_NAMES = new Set(['.git', '.svn', '.hg', 'CVS', 'node_modules', 'bower_components', 'vendor', '.beads']);
 const WORKTREE_DIRECTORY_NAMES = new Set(['.worktrees', 'worktrees']);
 const MAX_DIRECTORIES = 5000;
 const MAX_DEPTH = 8;
@@ -94,12 +95,19 @@ export async function createIntelephenseSettings(root: string, includeWorktrees 
  * The walk is bounded and skips dependency, metadata, and duplicate checkout
  * trees so opening a broad folder never triggers recursive LSP startup work.
  */
-export async function findWorkspaceComposerRoots(root: string, includeWorktrees = false): Promise<string[]> {
+export function findWorkspaceComposerRoots(root: string, includeWorktrees = false): Promise<string[]> {
+	return findWorkspaceProjectRoots(root, ['composer.json'], includeWorktrees, isPhpFile);
+}
+
+/** Shared bounded discovery; each adapter supplies its own workspace markers. */
+export async function findWorkspaceProjectRoots(root: string, markers: string[], includeWorktrees = false,
+	supportedFile?: (file: string) => boolean): Promise<string[]> {
 	const workspaceRoot = path.resolve(root);
-	if (existsSync(path.join(workspaceRoot, 'composer.json'))) return [workspaceRoot];
+	if (markers.some((marker) => existsSync(path.join(workspaceRoot, marker)))) return [workspaceRoot];
 	const registered = includeWorktrees ? [] : await findRegisteredWorktrees(workspaceRoot);
 	const results: string[] = [];
 	let visited = 0;
+	let hasLooseFiles = false;
 
 	const walk = async (directory: string, depth: number): Promise<void> => {
 		if (visited >= MAX_DIRECTORIES || results.length >= MAX_PROJECTS || depth > MAX_DEPTH) return;
@@ -107,7 +115,8 @@ export async function findWorkspaceComposerRoots(root: string, includeWorktrees 
 		visited++;
 		let entries;
 		try { entries = await fsp.readdir(directory, { withFileTypes: true }); } catch { return; }
-		if (entries.some((entry) => entry.isFile() && entry.name === 'composer.json')) {
+		if (supportedFile && entries.some((entry) => entry.isFile() && supportedFile(path.join(directory, entry.name)))) hasLooseFiles = true;
+		if (entries.some((entry) => entry.isFile() && markers.includes(entry.name))) {
 			results.push(directory);
 			return;
 		}
@@ -120,5 +129,5 @@ export async function findWorkspaceComposerRoots(root: string, includeWorktrees 
 	};
 
 	await walk(workspaceRoot, 0);
-	return results;
+	return results.length ? results : hasLooseFiles ? [workspaceRoot] : [];
 }

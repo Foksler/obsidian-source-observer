@@ -7,7 +7,7 @@ import { LSPClient, LSPPlugin, Workspace, type WorkspaceFile } from '@codemirror
 export interface Position { line: number; character: number }
 export interface Range { start: Position; end: Position }
 export interface LspLocation { uri: string; range: Range }
-export interface PhpSymbol {
+export interface LspSymbol {
 	name: string;
 	kind: number;
 	uri: string;
@@ -15,7 +15,7 @@ export interface PhpSymbol {
 	selectionRange?: Range;
 	detail?: string;
 	containerName?: string;
-	children?: PhpSymbol[];
+	children?: LspSymbol[];
 }
 
 export interface DocumentSymbol {
@@ -62,7 +62,7 @@ function toFilePath(uri: string): string | null {
 }
 
 /** Convert either flat workspace symbols or hierarchical document symbols. */
-export function toPhpSymbols(response: DocumentSymbol[] | SymbolInformation[] | null, fallbackUri: string): PhpSymbol[] {
+export function toLspSymbols(response: DocumentSymbol[] | SymbolInformation[] | null, fallbackUri: string): LspSymbol[] {
 	if (!response) return [];
 	return response.map((symbol) => {
 		if ('location' in symbol) {
@@ -75,7 +75,7 @@ export function toPhpSymbols(response: DocumentSymbol[] | SymbolInformation[] | 
 			name: symbol.name, kind: symbol.kind, uri: fallbackUri,
 			range: symbol.range, selectionRange: symbol.selectionRange,
 			detail: symbol.detail,
-			...(symbol.children ? { children: toPhpSymbols(symbol.children, fallbackUri) } : {}),
+			...(symbol.children ? { children: toLspSymbols(symbol.children, fallbackUri) } : {}),
 		};
 	});
 }
@@ -87,10 +87,13 @@ export class ViewerWorkspace extends Workspace {
 	private primedReferenceUris = new Set<string>();
 	private awaitingReferenceFiles = new Set<string>();
 	private display: (filePath: string) => Promise<EditorView | null>;
+	private languageId: (filePath: string) => string | null;
 
-	constructor(client: LSPClient, display: (filePath: string) => Promise<EditorView | null>) {
+	constructor(client: LSPClient, display: (filePath: string) => Promise<EditorView | null>,
+		languageId: (filePath: string) => string | null = () => 'plaintext') {
 		super(client);
 		this.display = display;
+		this.languageId = languageId;
 	}
 
 	syncFiles() { return []; }
@@ -130,7 +133,7 @@ export class ViewerWorkspace extends Workspace {
 		if (!filePath) return null;
 		try {
 			const contents = await fsp.readFile(filePath, 'utf8');
-			return { uri, languageId: 'php', version: 1, doc: Text.of(contents.split(/\r?\n/)), getView: () => null };
+			return { uri, languageId: this.languageId(filePath) ?? 'plaintext', version: 1, doc: Text.of(contents.split(/\r?\n/)), getView: () => null };
 		} catch { return null; }
 	}
 

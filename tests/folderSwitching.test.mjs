@@ -42,7 +42,14 @@ await build({
 				'./symbolPicker': 'export class SymbolPicker {}',
 				'./filePicker': 'export class FilePicker {}',
 				'./searchEverywhereModal': 'export class SearchEverywhereModal {}',
-				'./phpLsp': 'export class PhpLsp {} export function detectIntelephense() {} export function detectNode() {}',
+				'./lspNavigation': `
+					export class LspNavigation {
+						constructor(options, adapters) { this.options = options; this.adapters = adapters; this.disposed = false; }
+						setWorkspaceRoot(root) { this.root = root; }
+						dispose() { this.disposed = true; }
+					}
+					export function navigationAdapters(settings) { return ['php', 'go'].filter((id) => settings[id + 'Lsp']); }
+				`,
 				'./searchEngine': `
 					export function getRegisteredWorktrees(root) { return globalThis.__folderSwitchHarness.worktrees(root); }
 					export function invalidateFileIndex() {}
@@ -187,11 +194,11 @@ function setupView(activePath, paths = [activePath]) {
 		refreshTimer: null,
 		treeSearchTimer: null,
 		fileIndexTimer: null,
-		phpLsp: null,
+		languageNavigation: null,
 		lspKey: '',
 		stopWatching() {},
 		startWatching() { harness.watchRoots.push(this.repoPath); },
-		syncPhpLsp() {},
+		syncNavigation() {},
 		registerInterval(id) { return id; },
 	});
 	return { view, harness, codePane, editorTabs, searchPanel };
@@ -427,4 +434,34 @@ test('late nested Git status cannot show Changes for a newer non-Git selection',
  await view.refreshChanges(); late.resolve(true); await pending;
  assert.equal(view.gitSection.hidden, true);
  assert.equal(view.gitRoot, '');
+});
+
+test('changing enabled languages replaces navigation and clears search-only clients', () => {
+	const { view, codePane } = setupView('/project');
+	const attached = [];
+	codePane.setLsp = (lsp) => attached.push(lsp);
+	view.searchLsps = new Map();
+	view.plugin.settings.phpLsp = true;
+	view.plugin.settings.goLsp = false;
+	const sync = () => SourceObserverView.prototype.syncNavigation.call(view);
+	sync();
+	const php = view.languageNavigation;
+	assert.deepEqual(php.adapters, ['php']);
+	assert.equal(php.root, '/project');
+	const searchClient = { disposed: false, dispose() { this.disposed = true; } };
+	view.searchLsps.set('/other', searchClient);
+	view.plugin.settings.goLsp = true;
+	sync();
+	assert.equal(php.disposed, true);
+	assert.equal(searchClient.disposed, true);
+	assert.equal(view.searchLsps.size, 0);
+	assert.deepEqual(view.languageNavigation.adapters, ['php', 'go']);
+	assert.equal(attached.at(-1), view.languageNavigation);
+	const mixed = view.languageNavigation;
+	view.plugin.settings.phpLsp = false;
+	view.plugin.settings.goLsp = false;
+	sync();
+	assert.equal(mixed.disposed, true);
+	assert.equal(view.languageNavigation, null);
+	assert.equal(attached.at(-1), null);
 });

@@ -1,8 +1,5 @@
 import { spawn, type ChildProcess } from 'child_process';
-import { createHash } from 'crypto';
-import * as fs from 'fs';
 import * as fsp from 'fs/promises';
-import * as os from 'os';
 import * as path from 'path';
 import { pathToFileURL, fileURLToPath } from 'url';
 import { App, Notice, Platform, SuggestModal } from 'obsidian';
@@ -14,20 +11,17 @@ import {
 } from '@codemirror/lsp-client';
 import { hoverTooltips } from './hoverRendering';
 import { stdioTransport } from './lspTransport';
-import { isPhpFile } from './phpFiles';
+import type { LspAdapter } from './lspAdapter';
 import {
-	ViewerWorkspace, toPhpSymbols, dispatchDefinitionLocation, type PhpSymbol, type Position, type Range,
+	ViewerWorkspace, toLspSymbols, dispatchDefinitionLocation, type LspSymbol, type Position, type Range,
 	type LspLocation, type DocumentSymbol, type SymbolInformation,
 } from './lspWorkspace';
-import { createIntelephenseSettings, findWorkspaceComposerRoots } from './lspWorkspaceRoots';
-export type { PhpSymbol } from './lspWorkspace';
+export type { LspSymbol } from './lspWorkspace';
 
 const REQUEST_TIMEOUT_MS = 20000;
-export interface PhpLspOptions {
+export interface LanguageLspOptions {
 	app: App;
-	nodePath: string;
-	serverPath: string;
-	licenceKey: string;
+	adapter: LspAdapter;
 	/** Shows `filePath` in the code pane and resolves with its editor once loaded. */
 	display: (filePath: string) => Promise<EditorView | null>;
 	/** Called immediately before changing the displayed file during navigation. */
@@ -87,65 +81,21 @@ function normalizeLocation(location: LspLocation | LocationLink): LspLocation {
 		: { uri: location.targetUri, range: location.targetSelectionRange ?? location.targetRange };
 }
 
-function firstExisting(candidates: string[]): string {
-	return candidates.find((candidate) => candidate && fs.existsSync(candidate)) ?? '';
-}
-
-/** Finds a `node` binary; Obsidian's own Electron refuses ELECTRON_RUN_AS_NODE. */
-export function detectNode(): string {
-	const home = os.homedir();
-	return firstExisting([
-		path.join(home, '.local/bin/node'), '/opt/homebrew/bin/node',
-		'/usr/local/bin/node', '/usr/bin/node',
-	]);
-}
-
-/** Finds the newest Intelephense server bundled with Cursor or VS Code. */
-export function detectIntelephense(): string {
-	const home = os.homedir();
-	for (const editorDir of ['.cursor/extensions', '.vscode/extensions']) {
-		let entries: string[];
-		try { entries = fs.readdirSync(path.join(home, editorDir)); } catch { continue; }
-		const ext = entries.filter((entry) => entry.startsWith('bmewburn.vscode-intelephense-client-'))
-			.sort((a, b) => b.localeCompare(a, undefined, { numeric: true }))[0];
-		if (!ext) continue;
-		const server = path.join(home, editorDir, ext, 'node_modules/intelephense/lib/intelephense.js');
-		if (fs.existsSync(server)) return server;
-	}
-	return '';
-}
-
-/**
- * Nearest Composer folder above a file. Files in vendor belong to the project
- * owning that vendor tree, rather than a package's own composer.json.
- */
-export function findComposerRoot(filePath: string): string | null {
-	const parts = path.dirname(path.resolve(filePath)).split(path.sep);
-	const vendorAt = parts.indexOf('vendor');
-	let dir = vendorAt > 0 ? parts.slice(0, vendorAt).join(path.sep) : parts.join(path.sep);
-	if (!dir) dir = path.parse(path.resolve(filePath)).root;
-	for (;;) {
-		if (fs.existsSync(path.join(dir, 'composer.json'))) return dir;
-		const parent = path.dirname(dir);
-		if (parent === dir) return null;
-		dir = parent;
-	}
-}
-
 function toFilePath(uri: string): string | null {
 	try { return fileURLToPath(uri); } catch { return null; }
 }
 
-/** Runs Intelephense per project and exposes read-only PHP navigation. */
-export class PhpLsp {
+/** Shared read-only navigation and process lifecycle for one language adapter. */
+export class LanguageLsp {
 	private disposed = false;
 	private servers = new Map<string, Server>();
 	private failed = new Set<string>();
 	private workspaceRootsCache = new Map<string, string[]>();
 	private workspaceRoot: string | null = null;
+	private activeRoot: string | null = null;
 	private editorExtension: Extension;
 
-	constructor(private opts: PhpLspOptions) {
+	constructor(private opts: LanguageLspOptions) {
 		const jump = (view: EditorView) => this.jump(view);
 		this.editorExtension = [
 			hoverTooltips(this.opts.app),
@@ -172,34 +122,48 @@ export class PhpLsp {
 	/** Selects the default root used by workspace-symbol queries. */
 	setWorkspaceRoot(root: string) {
 		const normalizedRoot = root ? path.resolve(root) : null;
-		if (normalizedRoot !== this.workspaceRoot) this.workspaceRootsCache.clear();
+		if (normalizedRoot !== this.workspaceRoot) {
+			this.workspaceRootsCache.clear();
+			this.activeRoot = null;
+		}
 		this.workspaceRoot = normalizedRoot;
 	}
 
-	/** Extension for PHP files belonging to a Composer project. */
+	/** Attach only documents supported by this adapter. */
 	extensionFor(filePath: string): Extension {
-		if (!isPhpFile(filePath)) return [];
-		const root = findComposerRoot(filePath) ?? (this.workspaceRoot && isWithin(filePath, this.workspaceRoot) ? this.workspaceRoot : null);
+		const languageId = this.opts.adapter.languageId(filePath);
+		if (!languageId) return [];
+		const root = this.rootFor(filePath);
 		const server = root ? this.serverFor(root) : null;
-		return server ? server.client.plugin(pathToFileURL(path.resolve(filePath)).href, 'php') : [];
+		if (server) this.activeRoot = root;
+		return server ? server.client.plugin(pathToFileURL(path.resolve(filePath)).href, languageId) : [];
+	}
+
+	private rootFor(filePath: string): string | null {
+		if (this.opts.adapter.externalFilesUseActiveRoot && this.activeRoot && this.workspaceRoot && !isWithin(filePath, this.workspaceRoot)) {
+			return this.activeRoot;
+		}
+		return this.opts.adapter.projectRoot(filePath) ?? (this.workspaceRoot && isWithin(filePath, this.workspaceRoot) ? this.workspaceRoot : null);
 	}
 
 	/**
 	 * Fetch symbols for a document when `filePath` is supplied, or workspace
 	 * symbols for the configured root (optionally filtered by `query`).
 	 */
-	async symbols(query?: string, filePath?: string): Promise<PhpSymbol[]> {
+	async symbols(query?: string, filePath?: string): Promise<LspSymbol[]> {
 		if (this.disposed) return [];
 		if (filePath) {
-			const root = findComposerRoot(filePath) ?? (this.workspaceRoot && isWithin(filePath, this.workspaceRoot) ? this.workspaceRoot : null);
+			if (!this.opts.adapter.languageId(filePath)) return [];
+			const root = this.rootFor(filePath);
 			if (!root) return [];
 			const server = this.serverFor(root);
 			if (!server) return [];
 			try {
 				await server.client.initializing;
+				if (this.disposed) return [];
 				return await this.requestDocumentSymbols(server, path.resolve(filePath));
 			} catch (error) {
-				if (!this.failed.has(root)) this.showFailure(root, 'Could not load PHP symbols', error);
+				if (!this.failed.has(root)) this.showFailure(root, `Could not load ${this.opts.adapter.name} symbols`, error);
 				return [];
 			}
 		}
@@ -209,30 +173,36 @@ export class PhpLsp {
 		try {
 			let roots = this.workspaceRootsCache.get(workspaceRoot);
 			if (!roots) {
-				roots = await findWorkspaceComposerRoots(workspaceRoot, this.opts.includeWorktrees ?? false);
+				roots = await this.opts.adapter.workspaceRoots(workspaceRoot, this.opts.includeWorktrees ?? false);
 				if (this.disposed) return [];
 				this.workspaceRootsCache.set(workspaceRoot, roots);
 			}
-			const projects = roots.length ? roots : [workspaceRoot];
+			const projects = roots.length ? roots : [...this.servers.keys()];
 			const results = await Promise.all(projects.map(async (root) => {
 				const server = this.serverFor(root);
 				if (!server) return [];
-				await server.client.initializing;
-				server.client.sync();
-				const result = await server.client.request<{ query: string }, SymbolInformation[] | null>(
-					'workspace/symbol', { query: query ?? '' },
-				);
-				return toPhpSymbols(result, '');
+				try {
+					await server.client.initializing;
+					if (this.disposed) return [];
+					server.client.sync();
+					const result = await server.client.request<{ query: string }, SymbolInformation[] | null>(
+						'workspace/symbol', { query: query ?? '' },
+					);
+					return this.disposed ? [] : toLspSymbols(result, '');
+				} catch (error) {
+					if (!this.failed.has(root)) this.showFailure(root, `Could not load ${this.opts.adapter.name} symbols`, error);
+					return [];
+				}
 			}));
 			return results.flat();
 		} catch (error) {
-			if (!this.failed.has(workspaceRoot)) this.showFailure(workspaceRoot, 'Could not load PHP symbols', error);
+			if (!this.failed.has(workspaceRoot)) this.showFailure(workspaceRoot, `Could not load ${this.opts.adapter.name} symbols`, error);
 			return [];
 		}
 	}
 
-	async workspaceSymbols(query = ''): Promise<PhpSymbol[]> { return this.symbols(query); }
-	async documentSymbols(filePath: string): Promise<PhpSymbol[]> { return this.symbols(undefined, filePath); }
+	async workspaceSymbols(query = ''): Promise<LspSymbol[]> { return this.symbols(query); }
+	async documentSymbols(filePath: string): Promise<LspSymbol[]> { return this.symbols(undefined, filePath); }
 
 	/** Navigate to the definition at the current cursor. Suitable as a command callback. */
 	jumpToDefinition(view: EditorView): boolean { return this.jump(view); }
@@ -243,7 +213,7 @@ export class PhpLsp {
 	private jump(view: EditorView): boolean {
 		const plugin = LSPPlugin.get(view);
 		const capabilities = plugin?.client.serverCapabilities as unknown as { definitionProvider?: boolean } | null;
-		if (!plugin || capabilities?.definitionProvider === false) return false;
+		if (this.disposed || !plugin || capabilities?.definitionProvider === false) return false;
 		const initialDoc = view.state.doc;
 		const initialHead = view.state.selection.main.head;
 		const initialPosition = plugin.toPosition(initialHead) as unknown as Position;
@@ -251,7 +221,7 @@ export class PhpLsp {
 		void plugin.client.request<unknown, LspLocation | LspLocation[] | LocationLink[] | null>('textDocument/definition', {
 			textDocument: { uri: plugin.uri }, position: initialPosition,
 		}).then(async (response) => {
-			if (view.state.doc !== initialDoc || view.state.selection.main.head !== initialHead) return;
+			if (this.disposed || LSPPlugin.get(view) !== plugin || view.state.doc !== initialDoc || view.state.selection.main.head !== initialHead) return;
 			const rawLocations = response ? (Array.isArray(response) ? response : [response]) : [];
 			const locations = rawLocations.map(normalizeLocation)
 				.filter((location) => toFilePath(location.uri) !== null)
@@ -262,8 +232,8 @@ export class PhpLsp {
 				this.references(view);
 				return;
 			}
-		const choice = await this.chooseDefinition(locations);
-			if (view.state.doc !== initialDoc || view.state.selection.main.head !== initialHead || !choice) return;
+			const choice = await this.chooseDefinition(locations);
+			if (this.disposed || LSPPlugin.get(view) !== plugin || view.state.doc !== initialDoc || view.state.selection.main.head !== initialHead || !choice) return;
 			const location = choice.location;
 			if (!location) return;
 			await dispatchDefinitionLocation(
@@ -295,27 +265,28 @@ export class PhpLsp {
 
 	private references(view: EditorView): boolean {
 		const plugin = LSPPlugin.get(view);
-		if (!plugin) return false;
+		if (this.disposed || !plugin) return false;
 		plugin.client.sync();
 		void plugin.client.request<unknown, LspLocation[] | null>('textDocument/references', {
 			textDocument: { uri: plugin.uri },
 			position: plugin.toPosition(view.state.selection.main.head) as unknown as Position,
 			context: { includeDeclaration: true },
 		}).then(async (locations) => {
+			if (this.disposed || LSPPlugin.get(view) !== plugin) return;
 			const workspace = plugin.client.workspace as ViewerWorkspace;
 			await workspace.primeReferenceFiles((locations ?? []).map((location) => location.uri));
-			findReferences(view);
-			workspace.releasePrimedReferenceFiles();
+			try { if (!this.disposed && LSPPlugin.get(view) === plugin) findReferences(view); }
+			finally { workspace.releasePrimedReferenceFiles(); }
 		}).catch((error: unknown) => this.showFailure(path.dirname(toFilePath(plugin.uri) ?? ''), 'Finding references failed', error));
 		return true;
 	}
 
-	private async requestDocumentSymbols(server: Server, filePath: string): Promise<PhpSymbol[]> {
+	private async requestDocumentSymbols(server: Server, filePath: string): Promise<LspSymbol[]> {
 		const uri = pathToFileURL(filePath).href;
 		let openedHere = false;
 		if (!server.client.workspace.getFile(uri)) {
 			const contents = await fsp.readFile(filePath, 'utf8');
-			server.client.didOpen({ uri, languageId: 'php', version: 1, doc: Text.of(contents.split(/\r?\n/)), getView: () => null });
+			server.client.didOpen({ uri, languageId: this.opts.adapter.languageId(filePath) ?? 'plaintext', version: 1, doc: Text.of(contents.split(/\r?\n/)), getView: () => null });
 			openedHere = true;
 		}
 		try {
@@ -323,7 +294,7 @@ export class PhpLsp {
 			const result = await server.client.request<unknown, DocumentSymbol[] | SymbolInformation[] | null>(
 				'textDocument/documentSymbol', { textDocument: { uri } },
 			);
-			return toPhpSymbols(result, uri);
+			return toLspSymbols(result, uri);
 		} finally {
 			if (openedHere) server.client.didClose(uri);
 		}
@@ -335,66 +306,61 @@ export class PhpLsp {
 		const existing = this.servers.get(normalizedRoot);
 		if (existing) return existing;
 		if (this.failed.has(normalizedRoot)) return null;
-		if (!this.opts.nodePath || !this.opts.serverPath) {
+		const command = this.opts.adapter.command();
+		if (!command) {
 			this.failed.add(normalizedRoot);
-			new Notice('Source Observer: PHP navigation needs Node.js and Intelephense; set their paths in settings.');
+			new Notice(`Source Observer: ${this.opts.adapter.missingMessage}`);
 			return null;
 		}
 
 		let proc: ChildProcess;
 		try {
-			proc = spawn(this.opts.nodePath, [this.opts.serverPath, '--stdio'], {
-				cwd: normalizedRoot, stdio: ['pipe', 'pipe', 'pipe'],
+			proc = spawn(command.executable, command.args, {
+				cwd: normalizedRoot, env: command.env, stdio: ['pipe', 'pipe', 'pipe'],
 			});
 		} catch (error) {
 			this.failed.add(normalizedRoot);
-			this.showFailure(normalizedRoot, 'Could not start Intelephense', error);
+			this.showFailure(normalizedRoot, `Could not start ${this.opts.adapter.serverName}`, error);
 			return null;
 		}
 
-		const globalStorage = path.join(os.homedir(), '.cache', 'source-observer-intelephense');
-		const rootStorage = path.join(globalStorage, createHash('sha256').update(normalizedRoot).digest('hex'));
-		const storage = path.join(rootStorage, 'workspace');
 		const rootName = path.basename(normalizedRoot);
 		let server!: Server;
 		const client = new LSPClient({
 			rootUri: pathToFileURL(normalizedRoot).href,
 			timeout: REQUEST_TIMEOUT_MS,
-			initializationOptions: {
-				storagePath: storage, globalStoragePath: path.join(rootStorage, 'global'),
-				...(this.opts.licenceKey ? { licenceKey: this.opts.licenceKey } : {}),
-			},
-			workspace: (current) => new ViewerWorkspace(current, this.opts.display),
+			initializationOptions: this.opts.adapter.initializationOptions?.(normalizedRoot),
+			workspace: (current) => new ViewerWorkspace(current, this.opts.display, this.opts.adapter.languageId),
 			notificationHandlers: {
-				indexingStarted: () => {
+				[this.opts.adapter.indexingNotifications?.start ?? '$/sourceObserver/unusedStart']: () => {
 					server.indexingNotice?.hide();
-					server.indexingNotice = new Notice(`Indexing PHP in ${rootName}…`, 0);
+					server.indexingNotice = new Notice(`Indexing ${this.opts.adapter.name} in ${rootName}…`, 0);
 					return true;
 				},
-				indexingEnded: () => { server.indexingNotice?.hide(); server.indexingNotice = null; return true; },
+				[this.opts.adapter.indexingNotifications?.end ?? '$/sourceObserver/unusedEnd']: () => { server.indexingNotice?.hide(); server.indexingNotice = null; return true; },
 			},
 			extensions: [{
-			editorExtension: this.editorExtension,
-			clientCapabilities: { workspace: { configuration: true } },
-		}],
+				editorExtension: this.editorExtension,
+				clientCapabilities: { workspace: { configuration: true } },
+			}],
 		});
 		server = { client, proc, root: normalizedRoot, indexingNotice: null };
 		this.servers.set(normalizedRoot, server);
 		proc.stderr?.on('data', () => { /* Drain diagnostic output without logging it. */ });
-		proc.on('error', (error) => this.failServer(normalizedRoot, 'Could not start Intelephense', error));
+		proc.on('error', (error) => this.failServer(normalizedRoot, `Could not start ${this.opts.adapter.serverName}`, error));
 		proc.on('close', (code) => {
 			server.indexingNotice?.hide();
 			server.indexingNotice = null;
 			if (this.servers.get(normalizedRoot) === server) {
-				this.failServer(normalizedRoot, `Intelephense stopped${code === null ? '' : ` (exit ${code})`}`, null);
+				this.failServer(normalizedRoot, `${this.opts.adapter.serverName} stopped${code === null ? '' : ` (exit ${code})`}`, null);
 			}
 		});
 		let settingsPromise: Promise<unknown> | null = null;
 		client.connect(stdioTransport(proc, () => {
-			settingsPromise ??= createIntelephenseSettings(normalizedRoot, this.opts.includeWorktrees ?? false);
+			settingsPromise ??= this.opts.adapter.settings(normalizedRoot, this.opts.includeWorktrees ?? false);
 			return settingsPromise;
-		}));
-		void client.initializing.catch((error) => this.failServer(normalizedRoot, 'Intelephense initialization failed', error));
+		}, this.opts.adapter.configurationSection));
+		void client.initializing.catch((error) => this.failServer(normalizedRoot, `${this.opts.adapter.serverName} initialization failed`, error));
 		return server;
 	}
 
@@ -412,6 +378,7 @@ export class PhpLsp {
 	}
 
 	private showFailure(root: string, reason: string, error: unknown) {
+		if (this.disposed) return;
 		const detail = error instanceof Error ? `: ${error.message}` : '';
 		const project = path.basename(root);
 		new Notice(`Source Observer: ${reason}${project ? ` in ${project}` : ''}${detail}`);
@@ -424,8 +391,6 @@ export class PhpLsp {
 			this.failed.add(root);
 			indexingNotice?.hide();
 			client.disconnect();
-			proc.removeAllListeners('close');
-			proc.removeAllListeners('error');
 			proc.kill();
 		}
 		this.servers.clear();

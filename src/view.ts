@@ -17,9 +17,8 @@ import type { FindInFilesState } from './findInFilesScope';
 import { bindShortcuts, normalizeShortcuts } from './searchShortcuts';
 import { registerDoubleShiftSearch } from './searchMode';
 import type { SearchTab, SearchAction, EverywhereResult } from './searchEverywhere';
-import { isPhpFile } from './phpFiles';
 import { getRegisteredWorktrees, invalidateFileIndex, warmFileIndex } from './searchEngine';
-import { PhpLsp, detectIntelephense, detectNode } from './phpLsp';
+import { LspNavigation, navigationAdapters } from './lspNavigation';
 import { getChangedFiles, getFileDiff, getGitRoot, renderDiff, ChangedFile } from './gitDiff';
 
 export const VIEW_TYPE = 'source-observer';
@@ -52,7 +51,7 @@ export class SourceObserverView extends ItemView {
 	plugin: SourceObserverPlugin;
 	private fileTree!: FileTree;
 	private codePane!: CodePane;
-	private phpLsp: PhpLsp | null = null;
+	private languageNavigation: LspNavigation | null = null;
 	private lspKey = '';
 	private rightPane!: HTMLElement;
 	private changesContainer!: HTMLElement;
@@ -80,7 +79,7 @@ export class SourceObserverView extends ItemView {
 	private findInFiles: FindInFilesModal | null = null;
 	private findStates = new Map<string, FindInFilesState>();
 	private clearShortcuts?: () => void;
-	private searchLsps = new Map<string, PhpLsp>();
+	private searchLsps = new Map<string, LspNavigation>();
 	private recentFiles: string[] = [];
 	private gitSection!: HTMLElement;
 	private gitToggle!: HTMLButtonElement;
@@ -178,9 +177,9 @@ export class SourceObserverView extends ItemView {
 		this.addToolbarButton(toolbar, 'file-search', 'Quick open file', () => this.openFiles());
 		this.addToolbarButton(toolbar, 'locate-fixed', 'Locate current file in tree', () => { void this.locateCurrentFile(); });
 		this.addToolbarButton(toolbar, 'list-tree', 'Go to symbol in file', () => this.showSymbols(true));
-		this.addToolbarButton(toolbar, 'shapes', 'Go to PHP symbol', () => this.showSymbols(false));
-		this.addToolbarButton(toolbar, 'corner-down-right', 'Go to definition (F12)', () => { const view = this.codePane.getEditor(); if (view) this.phpLsp?.jumpToDefinition(view); });
-		this.addToolbarButton(toolbar, 'list', 'Find references (Shift+F12)', () => { const view = this.codePane.getEditor(); if (view) this.phpLsp?.findReferences(view); });
+		this.addToolbarButton(toolbar, 'shapes', 'Go to symbol', () => this.showSymbols(false));
+		this.addToolbarButton(toolbar, 'corner-down-right', 'Go to definition (F12)', () => { const view = this.codePane.getEditor(); if (view) this.languageNavigation?.jumpToDefinition(view); });
+		this.addToolbarButton(toolbar, 'list', 'Find references (Shift+F12)', () => { const view = this.codePane.getEditor(); if (view) this.languageNavigation?.findReferences(view); });
 		this.editorTabs = new EditorTabs(main.createDiv(), (tab) => { void this.openTab(tab); }, () => {
 			++this.diffRequestId; this.codePane.suspend(); this.pathLabel.setText('');
 			this.setGitContext(this.fileTree.getSelectedPath() ?? { path: this.repoPath, isDirectory: true });
@@ -201,7 +200,7 @@ export class SourceObserverView extends ItemView {
 			this.plugin.settings.editorFontFamily,
 			this.plugin.settings.editorFontLigatures,
 		);
-		this.syncPhpLsp();
+		this.syncNavigation();
 		this.codePane.setShortcuts(this.plugin.settings.shortcuts);
 
 		this.fileTree = new FileTree(
@@ -252,7 +251,7 @@ export class SourceObserverView extends ItemView {
 			this.searchPanel.setIncludeWorktrees(this.plugin.settings.includeWorktrees);
 			this.searchPanel.setShowHidden(this.plugin.settings.showHidden);
 			this.updateGitVisibility();
-			this.syncPhpLsp();
+			this.syncNavigation();
 		});
 		this.register(() => this.plugin.settingsEvents.offref(settingsRef));
 
@@ -263,31 +262,31 @@ export class SourceObserverView extends ItemView {
 		await this.plugin.explorerDock.attach({ view: this, sidebar, home: root, isClosed: () => this.closed });
 	}
 
-	/** Starts, restarts or stops the PHP language server to match the settings. */
-	private syncPhpLsp() {
+	/** Starts, restarts or stops language servers to match the settings. */
+	private syncNavigation() {
 		const s = this.plugin.settings;
-		const key = s.phpLsp && this.repoPath ? [this.repoPath, s.nodePath, s.intelephensePath, s.intelephenseLicence, String(s.includeWorktrees)].join('\0') : '';
+		const key = (s.phpLsp || s.goLsp) && this.repoPath
+			? [this.repoPath, s.phpLsp, s.goLsp, s.nodePath, s.intelephensePath, s.intelephenseLicence, s.goPath, s.goplsPath, s.includeWorktrees].join('\0') : '';
 		if (key === this.lspKey) return;
 		this.lspKey = key;
 		this.codePane.setLsp(null);
-		this.phpLsp?.dispose();
+		for (const lsp of this.searchLsps.values()) lsp.dispose();
+		this.searchLsps.clear();
+		this.languageNavigation?.dispose();
 		const folderRequest = this.folderRequestId;
-		this.phpLsp = key
-			? new PhpLsp({
+		this.languageNavigation = key
+			? new LspNavigation({
 				app: this.app,
-				nodePath: s.nodePath || detectNode(),
-				serverPath: s.intelephensePath || detectIntelephense(),
-				licenceKey: s.intelephenseLicence,
 				includeWorktrees: s.includeWorktrees,
 				display: (filePath) => {
 					if (this.closed || folderRequest !== this.folderRequestId) return Promise.resolve(null);
 					++this.diffRequestId; this.codePane.rememberPosition(); return this.codePane.open(filePath);
 				},
 				beforeJump: () => this.codePane.rememberPosition(),
-			})
+			}, navigationAdapters(s))
 			: null;
-		this.phpLsp?.setWorkspaceRoot(this.repoPath);
-		this.codePane.setLsp(this.phpLsp);
+		this.languageNavigation?.setWorkspaceRoot(this.repoPath);
+		this.codePane.setLsp(this.languageNavigation);
 	}
 
 	async openFolderDialog() {
@@ -368,7 +367,7 @@ export class SourceObserverView extends ItemView {
 		this.folderTabs.setFolders(this.folderPaths, dir);
 		this.searchPanel.setRoot(dir);
 		this.searchPanel.restoreState(session?.search ?? null);
-		this.syncPhpLsp();
+		this.syncNavigation();
 		// Start the tree load now to clear the previous folder synchronously.
 		const treeLoad = this.fileTree.loadPath(dir);
 		await this.persistFolders();
@@ -671,7 +670,7 @@ export class SourceObserverView extends ItemView {
 		this.everywhere = new SearchEverywhereModal(this.app, {
 			root: this.repoPath, roots: [...this.folderPaths], includeWorktrees: this.plugin.settings.includeWorktrees,
 			showHidden: this.plugin.settings.showHidden, recentFiles: [...this.recentFiles], actions,
-			symbols: this.plugin.settings.phpLsp ? (query, root) => this.searchSymbols(query, root) : undefined,
+			symbols: (this.plugin.settings.phpLsp || this.plugin.settings.goLsp) ? (query, root) => this.searchSymbols(query, root) : undefined,
 		}, tab, (result) => {
 			void this.openSearchResult(result).catch(() => new Notice('Could not open this search result.'));
 		}, (state) => { this.everywhereState = state; this.everywhere = null; }, this.plugin.settings, this.everywhereState);
@@ -697,13 +696,12 @@ export class SourceObserverView extends ItemView {
 
 	private searchSymbols(query: string, root: string) {
 		if (this.closed) return Promise.resolve([]);
-		if (root === this.repoPath && this.phpLsp) return this.phpLsp.workspaceSymbols(query);
+		if (root === this.repoPath && this.languageNavigation) return this.languageNavigation.workspaceSymbols(query);
 		let lsp = this.searchLsps.get(root);
 		if (!lsp) {
 			const s = this.plugin.settings;
-			lsp = new PhpLsp({ app: this.app, nodePath: s.nodePath || detectNode(),
-				serverPath: s.intelephensePath || detectIntelephense(), licenceKey: s.intelephenseLicence,
-				includeWorktrees: s.includeWorktrees, display: () => Promise.resolve(null), beforeJump: () => {} });
+			lsp = new LspNavigation({ app: this.app, includeWorktrees: s.includeWorktrees,
+				display: () => Promise.resolve(null), beforeJump: () => {} }, navigationAdapters(s));
 			lsp.setWorkspaceRoot(root);
 			this.searchLsps.set(root, lsp);
 		}
@@ -727,15 +725,15 @@ export class SourceObserverView extends ItemView {
 
 	openSymbols(document: boolean) { this.showSymbols(document); }
 
-	restartNavigation() { this.lspKey = ''; this.syncPhpLsp(); }
+	restartNavigation() { this.lspKey = ''; this.syncNavigation(); }
 
 	private showSymbols(document: boolean) {
 		if (!document && this.plugin.settings.searchMode === 'phpstorm') { this.openSearchEverywhere('symbols'); return; }
-		if (!this.phpLsp) { new Notice('Enable language navigation in settings.'); return; }
+		if (!this.languageNavigation) { new Notice('Enable language navigation in settings.'); return; }
 		const file = this.codePane.getCurrentFile();
-		if (document && (!file || !isPhpFile(file))) { new Notice('Open a source file first.'); return; }
+		if (document && (!file || !this.languageNavigation.supports(file))) { new Notice('Open a source file first.'); return; }
 		const folderRequest = this.folderRequestId;
-		new SymbolPicker(this.app, this.phpLsp, document ? file ?? undefined : undefined, (filePath, line, column) => {
+		new SymbolPicker(this.app, this.languageNavigation, document ? file ?? undefined : undefined, (filePath, line, column) => {
 			if (this.closed || folderRequest !== this.folderRequestId) return;
 			++this.diffRequestId; void this.codePane.openAt(filePath, line, column).then(() => this.codePane.focus());
 		}).open();
@@ -760,7 +758,7 @@ export class SourceObserverView extends ItemView {
 		this.stopWatching();
 		if (this.treeSearchTimer) { window.clearTimeout(this.treeSearchTimer); this.treeSearchTimer = null; }
 		this.codePane?.destroy();
-		this.phpLsp?.dispose();
-		this.phpLsp = null;
+		this.languageNavigation?.dispose();
+		this.languageNavigation = null;
 	}
 }

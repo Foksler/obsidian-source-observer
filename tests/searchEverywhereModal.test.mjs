@@ -177,9 +177,9 @@ test('All keeps named and text results in one list; Text shows the same matches'
 	modal.close();
 });
 
-test('disabled PHP navigation gives a helpful state without starting a provider request', () => {
+test('disabled language navigation gives a helpful state without starting a provider request', () => {
 	const { modal, harness } = setup('classes');
-	assert.match(modal.statusEl.text, /Enable php/);
+	assert.match(modal.statusEl.text, /Enable language navigation/);
 	assert.equal(modal.timer, null);
 	assert.equal(harness.calls.length, 0);
 	modal.close();

@@ -1,6 +1,7 @@
 import { App, Component, Notice, Platform, PluginSettingTab, Setting } from 'obsidian';
 import type SourceObserverPlugin from './main';
-import { detectIntelephense, detectNode } from './phpLsp';
+import { detectIntelephense, detectNode } from './phpAdapter';
+import { detectGo, detectGopls } from './goAdapter';
 import type { SearchMode } from './searchMode';
 import { DEFAULT_SHORTCUTS, SHORTCUT_ACTIONS, shortcutFromEvent, shortcutLabel, sameShortcut, type SearchShortcuts, type ShortcutAction } from './searchShortcuts';
 
@@ -25,6 +26,9 @@ export interface SourceObserverSettings {
 	nodePath: string;
 	intelephensePath: string;
 	intelephenseLicence: string;
+	goLsp: boolean;
+	goPath: string;
+	goplsPath: string;
 }
 
 export const DEFAULT_SETTINGS: SourceObserverSettings = {
@@ -45,6 +49,9 @@ export const DEFAULT_SETTINGS: SourceObserverSettings = {
 	nodePath: '',
 	intelephensePath: '',
 	intelephenseLicence: '',
+	goLsp: false,
+	goPath: '',
+	goplsPath: '',
 };
 
 /** Obsidian settings tab for configuring font size and hidden-file visibility. */
@@ -186,7 +193,7 @@ export class SourceObserverSettingTab extends PluginSettingTab {
 			);
 
 		const text = (name: string, desc: string, placeholder: string,
-			key: 'nodePath' | 'intelephensePath' | 'intelephenseLicence') =>
+			key: 'nodePath' | 'intelephensePath' | 'intelephenseLicence' | 'goPath' | 'goplsPath') =>
 			new Setting(containerEl)
 				.setName(name)
 				.setDesc(desc)
@@ -203,6 +210,19 @@ export class SourceObserverSettingTab extends PluginSettingTab {
 		text('Intelephense path', 'Path to intelephense.js. Leave empty to use the one bundled with Cursor or VS Code.',
 			detectIntelephense() || 'not found', 'intelephensePath');
 		text('Intelephense licence key', 'Optional; unlocks premium features such as go to implementation.', '', 'intelephenseLicence');
+
+		new Setting(containerEl).setName('Go navigation').setHeading();
+		new Setting(containerEl)
+			// eslint-disable-next-line obsidianmd/ui/sentence-case -- Go is the language's name.
+			.setName('Enable Go language server')
+			.setDesc('Browse definitions, references, documentation and symbols using gopls and a locally installed toolchain.')
+			.addToggle((toggle) => toggle.setValue(this.plugin.settings.goLsp).onChange(async (value) => {
+				this.plugin.settings.goLsp = value;
+				await this.plugin.saveSettings();
+			}));
+		text('Go path', 'Path to the go executable. Leave empty to auto-detect.', detectGo() || 'not found', 'goPath');
+		text('Gopls path', 'Path to gopls. Install with go install golang.org/x/tools/gopls@latest, then leave empty to auto-detect.',
+			detectGopls() || 'not found', 'goplsPath');
 
 		new Setting(containerEl).setName('Files').setHeading();
 

@@ -40,13 +40,14 @@ export function encodeLspMessage(message: string): Buffer {
 }
 
 /**
- * Answers Intelephense's settings request before it reaches CodeMirror's LSP
+ * Answers the adapter's settings request before it reaches CodeMirror's LSP
  * client, which treats server-initiated requests as unsupported.
  */
-export function answerIntelephenseConfiguration(
+export function answerWorkspaceConfiguration(
 	proc: ChildProcess,
 	message: string,
 	settings: () => Promise<unknown>,
+	section = '',
 ): boolean {
 	let req: LspMessage;
 	try { req = JSON.parse(message) as LspMessage; } catch { return false; }
@@ -54,7 +55,7 @@ export function answerIntelephenseConfiguration(
 	const params = req.params as { items?: { section?: string }[] } | undefined;
 	const sendResult = (intelephenseSettings: unknown) => {
 		if (proc.exitCode !== null || proc.killed || !proc.stdin?.writable) return;
-		const result = (params?.items ?? []).map((item) => item.section === 'intelephense' ? intelephenseSettings : null);
+		const result = (params?.items ?? []).map((item) => (!item.section || item.section === section) ? intelephenseSettings : null);
 		proc.stdin.write(encodeLspMessage(JSON.stringify({ jsonrpc: '2.0', id: req.id, result })));
 	};
 	try { void settings().then(sendResult, () => sendResult(null)); }
@@ -63,7 +64,7 @@ export function answerIntelephenseConfiguration(
 }
 
 /** LSP over stdio with bounded buffering and safe event delivery. */
-export function stdioTransport(proc: ChildProcess, settings: () => Promise<unknown>): Transport {
+export function stdioTransport(proc: ChildProcess, settings: () => Promise<unknown>, section = ''): Transport {
 	const handlers = new Set<(value: string) => void>();
 	const pendingRequests = new Map<string, Set<(value: string) => void>>();
 	let buffer: Buffer<ArrayBufferLike> = Buffer.alloc(0);
@@ -79,7 +80,7 @@ export function stdioTransport(proc: ChildProcess, settings: () => Promise<unkno
 		pendingRequests.delete(key);
 		const message = JSON.stringify({
 			jsonrpc: '2.0', id,
-			error: { code: -32000, message: error instanceof Error ? error.message : 'PHP language server is not running' },
+			error: { code: -32000, message: error instanceof Error ? error.message : 'Language server is not running' },
 		});
 		deliver(message, targets);
 	};
@@ -93,7 +94,7 @@ export function stdioTransport(proc: ChildProcess, settings: () => Promise<unkno
 		}
 	};
 	const isDead = () => closed || proc.exitCode !== null || proc.killed || !proc.stdin?.writable;
-	const processClosedError = () => new Error('PHP language server is not running');
+	const processClosedError = () => new Error('Language server is not running');
 	proc.once('exit', () => failAll(processClosedError()));
 	proc.once('close', () => failAll(processClosedError()));
 	proc.once('error', (error) => failAll(error));
@@ -107,7 +108,7 @@ export function stdioTransport(proc: ChildProcess, settings: () => Promise<unkno
 				const value = JSON.parse(message) as LspMessage;
 				if (value.id !== undefined && !value.method) pendingRequests.delete(requestKey(value.id));
 			} catch { /* Let the LSP client report malformed server responses. */ }
-			if (answerIntelephenseConfiguration(proc, message, settings)) continue;
+			if (answerWorkspaceConfiguration(proc, message, settings, section)) continue;
 			for (const handler of handlers) handler(message);
 		}
 	});
@@ -119,7 +120,7 @@ export function stdioTransport(proc: ChildProcess, settings: () => Promise<unkno
 			if (handlers.size === 0 && !isRequest) return;
 			if (isDead()) {
 				if (isRequest && value?.id !== undefined) {
-					deliver(JSON.stringify({ jsonrpc: '2.0', id: value.id, error: { code: -32000, message: 'PHP language server is not running' } }), handlers);
+					deliver(JSON.stringify({ jsonrpc: '2.0', id: value.id, error: { code: -32000, message: 'Language server is not running' } }), handlers);
 				}
 				return;
 			}

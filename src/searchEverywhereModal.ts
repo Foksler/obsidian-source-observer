@@ -205,7 +205,7 @@ export class SearchEverywhereModal extends Modal {
 		const query = this.queryInput.value;
 		if (this.tab === 'text' && !query) { this.statusEl.setText('Enter text to search.'); return; }
 		if ((this.tab === 'classes' || this.tab === 'symbols') && !this.context.symbols) {
-			this.statusEl.setText('Enable php language navigation in settings to search symbols.'); return;
+			this.statusEl.setText('Enable language navigation in settings to search symbols.'); return;
 		}
 		this.statusEl.setText(!query.trim() && this.tab === 'all' ? 'Loading recent files…' : 'Searching…');
 		this.resultsEl.setAttribute('aria-busy', 'true');

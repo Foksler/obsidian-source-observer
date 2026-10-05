@@ -5,7 +5,8 @@ import { EditorView, keymap, lineNumbers, highlightActiveLine } from '@codemirro
 import { bracketMatching } from '@codemirror/language';
 import { openSearchPanel, search, searchKeymap } from '@codemirror/search';
 import type { SyntaxTheme } from './settings';
-import type { PhpLsp } from './phpLsp';
+import type { LspNavigation } from './lspNavigation';
+import { go } from '@codemirror/lang-go';
 import { obsidianTheme, syntaxTheme } from './editorThemes';
 import { phpWithSemanticHighlighting } from './phpSyntax';
 import { javascript } from '@codemirror/lang-javascript';
@@ -19,6 +20,7 @@ import { isPhpFile } from './phpFiles';
 import { normalizeShortcuts, type SearchShortcuts } from './searchShortcuts';
 
 const EXT_LANG: Record<string, () => ReturnType<typeof javascript>> = {
+	go:   () => go(),
 	js:   () => javascript(),
 	jsx:  () => javascript({ jsx: true }),
 	ts:   () => javascript({ typescript: true }),
@@ -121,7 +123,7 @@ export class CodePane {
 	private theme = new Compartment();
 	private themeName: SyntaxTheme;
 	private lspSlot = new Compartment();
-	private lsp: PhpLsp | null = null;
+	private lsp: LspNavigation | null = null;
 	private shortcutConfig = normalizeShortcuts(undefined);
 	private shortcuts = new Compartment();
 	private currentPath: string | null = null;
@@ -140,8 +142,8 @@ export class CodePane {
 		this.onShown = onShown;
 	}
 
-	/** Attaches or detaches the PHP language server for the currently displayed file. */
-	setLsp(lsp: PhpLsp | null) {
+	/** Attaches or detaches language navigation for the currently displayed file. */
+	setLsp(lsp: LspNavigation | null) {
 		if (this.lsp === lsp) return;
 		this.view?.dispatch({ effects: this.lspSlot.reconfigure([]) });
 		this.lsp = lsp;

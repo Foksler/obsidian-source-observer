@@ -6,7 +6,7 @@ import { searchFilePathIndex } from './filePathIndex.ts';
 import { getRegisteredWorktrees, type SearchOptions } from './searchEngine.ts';
 import { searchContentPage } from './contentSearchPage.ts';
 import { containsFile, searchRoots } from './searchRoots.ts';
-import type { PhpSymbol } from './phpLsp';
+import type { LspSymbol } from './lspWorkspace';
 
 export const SEARCH_TABS = ['all', 'files', 'classes', 'symbols', 'actions', 'text'] as const;
 export type SearchTab = typeof SEARCH_TABS[number];
@@ -32,7 +32,7 @@ export interface EverywhereContext {
 	showHidden: boolean;
 	recentFiles: string[];
 	actions: SearchAction[];
-	symbols?: (query: string, root: string) => Promise<PhpSymbol[]>;
+	symbols?: (query: string, root: string) => Promise<LspSymbol[]>;
 }
 export interface EverywhereBatch {
 	category: Exclude<SearchTab, 'all'>;
@@ -47,11 +47,11 @@ function fileResult(root: string, filePath: string): EverywhereResult {
 	return { id: `file:${filePath}`, category: 'files', name: path.basename(filePath), detail: path.relative(root, filePath), filePath, rootPath: root };
 }
 
-export function flattenSymbols(symbols: PhpSymbol[]): PhpSymbol[] {
+export function flattenSymbols(symbols: LspSymbol[]): LspSymbol[] {
 	return symbols.flatMap((symbol) => [symbol, ...flattenSymbols(symbol.children ?? [])]);
 }
 
-export function symbolResults(root: string, symbols: PhpSymbol[], query: string, classesOnly: boolean): EverywhereResult[] {
+export function symbolResults(root: string, symbols: LspSymbol[], query: string, classesOnly: boolean): EverywhereResult[] {
 	const match = createFileMatcher(query);
 	const ranked: Array<{ result: EverywhereResult; score: number }> = [];
 	const seen = new Set<string>();
@@ -92,7 +92,7 @@ async function recentResults(context: EverywhereContext, worktrees: string[], si
 	return files.filter((file): file is EverywhereResult => file !== null).slice(0, 50);
 }
 
-/** Providers publish independently, so PHP indexing never delays filename results. */
+/** Providers publish independently, so language-server indexing never delays filename results. */
 export async function searchEverywhere(context: EverywhereContext, tab: SearchTab, query: string,
 	options: Omit<SearchOptions, 'query'>, signal: AbortSignal, publish: (batch: EverywhereBatch) => void): Promise<void> {
 	const tasks: Promise<void>[] = [];

@@ -13,8 +13,8 @@ The original author's MIT licence and Git history are preserved.
 ## Features
 
 - **File tree** — open any folder, navigate directories, see file-type icons with language colours
-- **Syntax highlighting** — PHP, JS/TS, Python, Rust, CSS, HTML, JSON and Markdown; choose Cursor Monokai Pro, VS Code Dark+, One Dark or your Obsidian theme
-- **PHP navigation** — local Intelephense definitions, references, hover documentation and symbols
+- **Syntax highlighting** — PHP, Go, JS/TS, Python, Rust, CSS, HTML, JSON and Markdown; choose Cursor Monokai Pro, VS Code Dark+, One Dark or your Obsidian theme
+- **Language navigation** — local Intelephense for PHP and opt-in gopls for Go: definitions, references, hover documentation and symbols
 - **Quick open** — search filenames and paths with fuzzy matching in a separate keyboard-driven picker
 - **Source tabs** — open multiple files and diffs, with cursor and scroll position restoration
 - **Folder tabs** — open several folders from the toolbar, switch between them above the file tree, and close a folder with its × button. Each folder keeps its own files, cursor positions, navigation history, and search while the view is open; the folder list and active folder also survive a restart.
@@ -79,7 +79,7 @@ Choose **Settings → Source observer → Search mode**:
 - **PhpStorm** routes quick open and workspace search to a single modal. Press
   **Shift twice** while Source Observer has focus, select the **Search everywhere**
   toolbar button, or run the **Search everywhere** command. **All** searches files,
-  PHP symbols, the plugin's navigation actions and every text occurrence. Named
+  PHP and Go symbols, the plugin's navigation actions and every text occurrence. Named
   results and text matches share a compact list above a read-only source preview.
   **Search filters** (or **F6**) reveals the folder scope and search options. **Search in**
   selects all open folders or a specific folder; choosing a result switches to its
@@ -137,15 +137,15 @@ also receive global shortcuts in Obsidian's **Hotkeys** settings.
 This desktop plugin reads the folder you select outside the vault. Source files
 are read-only: navigation, search and diffs never save changes to the codebase.
 
-- **PHP navigation:** Cmd-click (Ctrl-click on Windows/Linux) or F12 opens a
+- **Language navigation:** Cmd-click (Ctrl-click on Windows/Linux) or F12 opens a
   definition. Clicking a declaration shows usages. Shift+F12 opens references;
-  select a result to navigate to its file. Hover displays PHP documentation.
+  select a result to navigate to its file. Hover displays documentation from the enabled language server.
   Use Cmd+[ / Cmd+] or the toolbar arrows to return and move forward.
-- **Symbols:** Cmd+Alt+O lists the current PHP file's symbols. Cmd+T searches
-  workspace PHP symbols, including Composer projects inside the selected folder.
+- **Symbols:** Cmd+Alt+O lists the current PHP or Go file's symbols. Cmd+T searches
+  workspace symbols across enabled languages, including nested Composer and Go projects.
   These actions are also available in the command palette and toolbar.
 - **Quick open:** in VS Code mode, Cmd+P or Cmd+Shift+O opens a separate file picker for the
-  selected folder, regardless of the current file or PHP navigation settings.
+  selected folder, regardless of the current file or language navigation settings.
   On Windows/Linux use Ctrl instead of Cmd. Type a filename, abbreviation or
   path/name terms, use the arrow keys to select a result and Enter to open it;
   Escape closes the picker. Matching ignores case and tolerates gaps:
@@ -192,11 +192,23 @@ in **Settings → Source observer**. It starts one local server per project, sto
 its index under `~/.cache/source-observer-intelephense`, disables telemetry and
 stops servers when the view closes. No code is uploaded to an external service.
 An optional Intelephense licence is not required for definitions, references,
-hover or symbols. Go to implementation and editing/refactoring are not exposed.
+hover or symbols. Go navigation is opt-in: enable **Go language server** in **Settings → Source observer**.
+Install Go and `gopls` (`go install golang.org/x/tools/gopls@latest`), then set
+**Go path** and **Gopls path** if auto-detection does not find them. The plugin
+launches gopls directly and makes the selected Go executable available on its PATH.
+A containing `go.work` takes precedence over `go.mod`; nested modules are discovered
+for workspace symbol search. `go.mod`, `go.work` and sum files also use their
+corresponding gopls language identifiers. Worktrees are excluded by default.
+Gopls may download dependencies through the Go module proxy while resolving imports.
+Switching folders, changing navigation settings, restarting navigation or closing
+the view stops the old server processes. Go to implementation and editing/refactoring
+are not exposed.
 
 Run the checks with Node.js 24 or newer: `npm test`, `npm run lint` and `npm run build` before installing the three
-release files into `<vault>/.obsidian/plugins/source-observer/`. The real-server
-test is skipped if Intelephense is absent; search/framing tests always run.
+release files into `<vault>/.obsidian/plugins/source-observer/`. Real-server
+tests are skipped when their binaries are absent; search/framing tests always run.
+For Go integration tests with explicit paths, set `SOURCE_OBSERVER_GO` and
+`SOURCE_OBSERVER_GOPLS` to the executable paths before running `npm test`.
 
 For an opt-in filename benchmark against Cursor's bundled ripgrep, run
 `node tests/searchBenchmark.mjs /absolute/project/path StatsController 10`.
