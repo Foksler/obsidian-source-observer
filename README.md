@@ -4,6 +4,8 @@ A lightweight codebase viewer for [Obsidian](https://obsidian.md). Browse any fo
 
 This repository extends [IceKhan13/obsidian-source-observer](https://github.com/IceKhan13/obsidian-source-observer)
 with PHP language navigation, fuzzy quick open, source tabs and additional editor themes.
+Originally created by [Iskandar Sitdikov](https://github.com/IceKhan13).
+This fork is maintained by [Foksler](https://github.com/Foksler).
 The original author's MIT licence and Git history are preserved.
 
 ![Source Observer](obsidian-plugin.png)
