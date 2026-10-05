@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { mkdtemp, mkdir, rm, writeFile } from 'node:fs/promises';
+import { mkdtemp, mkdir, rm, symlink, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
@@ -74,4 +74,30 @@ test('aborting a live stream rejects and a consumer error is propagated without 
 	await assert.rejects(streamRipgrep(['--json', 'needle', root], controller.signal, () => controller.abort()), /cancelled/i);
 	await assert.rejects(streamRipgrep(['--json', 'needle', root], new AbortController().signal,
 		() => { throw new Error('consumer failed'); }), /consumer failed/);
+});
+
+test('searching through a symlinked root preserves displayed paths, counts and Unicode columns', async (t) => {
+	const parent = await fixture(t, 'outside needle');
+	const real = path.join(parent, 'real');
+	const alias = path.join(parent, 'alias');
+	await mkdir(real);
+	await writeFile(path.join(real, 'Source.php'), '😀 needle needle\n');
+	await symlink(real, alias, 'dir');
+	await symlink(real, path.join(real, 'cycle'), 'dir');
+	const page = await searchContentPage(alias, { query: 'needle' }, new AbortController().signal);
+	assert.equal(page.totalFiles, 1);
+	assert.equal(page.totalMatches, 2);
+	assert.deepEqual(page.matches.map(({ filePath, column }) => [filePath, column]),
+		[[path.join(alias, 'Source.php'), 4], [path.join(alias, 'Source.php'), 11]]);
+});
+
+test('a bounded stream consumer stops successfully without delivering later records', async (t) => {
+	if (!await resolveRgExecutable()) return t.skip('Requires ripgrep');
+	const root = await fixture(t, 'needle\n'.repeat(10000));
+	const records = [];
+	await streamRipgrep(['--json', 'needle', root], new AbortController().signal, (line) => {
+		records.push(line);
+		return records.length < 3;
+	});
+	assert.equal(records.length, 3);
 });

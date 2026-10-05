@@ -85,8 +85,8 @@ export async function runRipgrep(args: string[], signal: AbortSignal, maxBytes =
 	});
 }
 
-/** Consume JSON events without collecting or cutting off the complete result stream. */
-export async function streamRipgrep(args: string[], signal: AbortSignal, line: (json: string) => void, separator = '\n', cwd?: string): Promise<void> {
+/** Return false from the consumer to stop a bounded inventory; content searches consume the full stream. */
+export async function streamRipgrep(args: string[], signal: AbortSignal, line: (record: string) => void | boolean, separator = '\n', cwd?: string): Promise<void> {
 	if (signal.aborted) throw new Error('Search cancelled');
 	const executable = await resolveRgExecutable();
 	if (signal.aborted) throw new Error('Search cancelled');
@@ -96,22 +96,25 @@ export async function streamRipgrep(args: string[], signal: AbortSignal, line: (
 		let buffer = '';
 		let stderr = '';
 		let failed = false;
+		let stopped = false;
 		const abort = () => child.kill();
 		const cleanup = () => signal.removeEventListener('abort', abort);
 		const consume = (value: string) => {
-			try { line(value); }
+			try { if (line(value) === false) { stopped = true; child.kill(); } }
 			catch (error) { failed = true; cleanup(); child.kill(); reject(error instanceof Error ? error : new Error(String(error))); }
 		};
 		child.stdout.setEncoding('utf8');
 		child.stdout.on('data', (chunk: string) => {
-			if (signal.aborted || failed) return;
+			if (signal.aborted || failed || stopped) return;
 			buffer += chunk;
 			let end: number;
-			while ((end = buffer.indexOf(separator)) >= 0) {
-				consume(buffer.slice(0, end));
-				if (failed) return;
-				buffer = buffer.slice(end + separator.length);
+			let start = 0;
+			while ((end = buffer.indexOf(separator, start)) >= 0) {
+				consume(buffer.slice(start, end));
+				if (failed || stopped || signal.aborted) return;
+				start = end + separator.length;
 			}
+			buffer = buffer.slice(start);
 		});
 		child.stderr.setEncoding('utf8');
 		child.stderr.on('data', (chunk: string) => { stderr = (stderr + chunk).slice(-65536); });
@@ -120,9 +123,9 @@ export async function streamRipgrep(args: string[], signal: AbortSignal, line: (
 			cleanup();
 			if (failed) return;
 			if (signal.aborted) { reject(new Error('Search cancelled')); return; }
-			if (buffer) consume(buffer);
+			if (!stopped && buffer) consume(buffer);
 			if (failed) return;
-			if (code === 0 || code === 1) resolve();
+			if (stopped || code === 0 || code === 1) resolve();
 			else reject(new Error(stderr.trim() || `rg exited with code ${code}`));
 		});
 		if (signal.aborted) abort(); else signal.addEventListener('abort', abort, { once: true });

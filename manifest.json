@@ -3,7 +3,7 @@
 	"name": "Source Observer",
 	"version": "1.0.3",
 	"minAppVersion": "1.7.2",
-	"description": "Browse any local codebase, view syntax-highlighted files, and review git diffs — without leaving your vault.",
+	"description": "Browse local codebases, view syntax-highlighted files, and review Git diffs without leaving your vault.",
 	"author": "Iskandar Sitdikov",
 	"authorUrl": "https://github.com/IceKhan13",
 	"isDesktopOnly": true

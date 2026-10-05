@@ -6,6 +6,7 @@ import test, { after, before, mock } from 'node:test';
 import { searchContentPage } from '../src/contentSearchPage.ts';
 import { resolveRgExecutable, streamRipgrep } from '../src/rgRunner.ts';
 import { searchContent } from '../src/searchEngine.ts';
+import { collectFilePaths, inventoryFilePaths } from '../src/fileInventory.ts';
 
 // Node runs each test file in its own process, keeping discovery's cached result isolated.
 before(() => {
@@ -66,4 +67,27 @@ test('fallback keeps its file-size and binary limits while searching readable so
 	assert.equal(page.totalMatches, 1);
 	assert.equal(page.totalFiles, 1);
 	assert.equal(path.basename(page.matches[0].filePath), 'source.txt');
+});
+
+test('filename fallback shares exclusions, skips cycles and bounds its parallel enumeration', async (t) => {
+	const root = await fixture(t);
+	const names = ['src/Alpha.php', 'vendor/Beta.php', '.hidden/Gamma.php', 'worktrees/branch/Skip.php',
+		'unusual[branch]/Skip.php', '.git/Skip.php', 'node_modules/Skip.php'];
+	for (const name of names) {
+		await fs.mkdir(path.dirname(path.join(root, name)), { recursive: true });
+		await fs.writeFile(path.join(root, name), '');
+	}
+	await fs.symlink(root, path.join(root, 'src/cycle'), 'dir');
+	const signal = new AbortController().signal;
+	const roots = [path.join(root, 'unusual[branch]')];
+	const full = [];
+	await inventoryFilePaths(root, false, roots, signal, (_file, relative) => full.push(relative));
+	const expected = ['.hidden/Gamma.php', 'src/Alpha.php', 'vendor/Beta.php'];
+	assert.deepEqual(full.sort(), expected);
+	assert.deepEqual((await collectFilePaths(root, false, roots, signal, 3)).paths.sort(), expected);
+	assert.equal((await collectFilePaths(root, false, roots, signal, 3)).truncated, false);
+	assert.equal((await collectFilePaths(root, false, roots, signal, 2)).truncated, true);
+	const controller = new AbortController();
+	controller.abort();
+	await assert.rejects(collectFilePaths(root, false, roots, controller.signal, 3), /cancelled/i);
 });

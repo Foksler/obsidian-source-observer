@@ -1,7 +1,7 @@
 {
 	"name": "source-observer",
 	"version": "1.0.3",
-	"description": "Browse any local codebase, view syntax-highlighted files, and review git diffs \u2014 without leaving your vault.",
+	"description": "Browse local codebases, view syntax-highlighted files, and review Git diffs without leaving your vault.",
 	"main": "main.js",
 	"type": "module",
 	"scripts": {

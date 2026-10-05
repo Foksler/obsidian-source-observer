@@ -1,7 +1,8 @@
 import * as path from 'path';
-import { realpathSync, promises as fs } from 'fs';
+import { promises as fs } from 'fs';
 import { streamRipgrep } from './rgRunner.ts';
-import { getRegisteredWorktrees, makeRgArgs, parseRgJson, searchContentFallback, type SearchMatch, type SearchOptions } from './searchEngine.ts';
+import { getRegisteredWorktrees, makeRgArgs, searchContentFallback, type SearchMatch, type SearchOptions } from './searchEngine.ts';
+import { createRgParser } from './rgParser.ts';
 import { searchPreview } from './searchPreview.ts';
 
 export interface ContentSearchPage {
@@ -19,15 +20,11 @@ export async function searchContentPage(root: string, options: SearchOptions, si
 	const worktrees = await getRegisteredWorktrees(root);
 	const seen = new Set<string>();
 	const files = new Set<string>();
-	const canonical = new Map<string, string>();
 	const accept = (match: SearchMatch) => {
 		if (includeFile && !includeFile(match.filePath)) return;
 		if (!options.includeWorktrees && worktrees.some((tree) => match.filePath === tree || match.filePath.startsWith(`${tree}${path.sep}`))) return;
-		let file = canonical.get(match.filePath);
-		if (!file) {
-			try { file = realpathSync(match.filePath); } catch { file = match.filePath; }
-			canonical.set(match.filePath, file);
-		}
+		// Both scans resolve into the selected root and never follow nested symlinks.
+		const file = match.filePath;
 		const key = `${file}:${match.line}:${match.column}`;
 		if (seen.has(key)) return;
 		seen.add(key);
@@ -35,8 +32,10 @@ export async function searchContentPage(root: string, options: SearchOptions, si
 		const index = page.totalMatches++;
 		if (index >= offset && page.matches.length < limit) page.matches.push({ ...match, text: searchPreview(match.text, match.column) });
 	};
+	const parse = createRgParser(root);
 	const consume = (line: string) => {
-		for (const group of parseRgJson(line, Number.MAX_SAFE_INTEGER, root)) for (const match of group.matches) accept(match);
+		const group = parse(line);
+		if (group) for (const match of group.matches) accept(match);
 	};
 	try {
 		await streamRipgrep(['--sort', 'path', ...makeRgArgs(root, options, worktrees)], signal, consume, '\n', root);

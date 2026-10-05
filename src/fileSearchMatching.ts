@@ -1,7 +1,3 @@
-interface QueryTerm {
-	value: string;
-}
-
 const BASENAME_STEM_EXACT = 10_000;
 const MAX_MATCHED_PATH_LENGTH = 8_192;
 
@@ -9,12 +5,11 @@ function normalizePath(path: string): string[] {
 	return path.slice(0, MAX_MATCHED_PATH_LENGTH).split(/[\\/]+/).filter(Boolean);
 }
 
-function queryTerms(query: string): QueryTerm[] {
+function queryTerms(query: string): string[] {
 	return query
 		.toLowerCase()
 		.split(/[\s\\/]+/)
-		.filter(Boolean)
-		.map((value) => ({ value }));
+		.filter(Boolean);
 }
 
 function extensionless(name: string): string {
@@ -24,24 +19,26 @@ function extensionless(name: string): string {
 
 function isBoundary(source: string, index: number): boolean {
 	if (index === 0) return true;
-	const current = source[index] ?? '';
-	const previous = source[index - 1] ?? '';
-	return /[^a-zA-Z0-9]/.test(previous) || (/[a-z]/.test(previous) && /[A-Z]/.test(current));
+	const current = source.charCodeAt(index);
+	const previous = source.charCodeAt(index - 1);
+	const lower = previous >= 97 && previous <= 122;
+	return !(lower || (previous >= 65 && previous <= 90) || (previous >= 48 && previous <= 57))
+		|| (lower && current >= 65 && current <= 90);
 }
 
 function containsSubsequence(source: string, term: string): boolean {
 	if (source.includes(term)) return true;
-	let termIndex = 0;
-	for (let index = 0; index < source.length && termIndex < term.length; index++) {
-		if (source[index] === term[termIndex]) termIndex++;
+	let position = -1;
+	for (let index = 0; index < term.length; index++) {
+		position = source.indexOf(term[index]!, position + 1);
+		if (position < 0) return false;
 	}
-	return termIndex === term.length;
+	return true;
 }
 
 /** Returns a field match score; exact/substring filename matches outrank directory matches. */
-function scoreField(source: string, term: string, field: 'stem' | 'name' | 'directory'): number {
+function scoreField(source: string, foldedSource: string, term: string, field: 'stem' | 'name' | 'directory'): number {
 	if (!source) return 0;
-	const foldedSource = source.toLowerCase();
 	const base = field === 'stem' ? 520 : field === 'name' ? 500 : 190;
 	if (foldedSource === term) return base + 160;
 
@@ -53,20 +50,18 @@ function scoreField(source: string, term: string, field: 'stem' | 'name' | 'dire
 	}
 
 	// Greedy subsequence matching handles terse camel-case searches such as DshbrdCtrlr.
-	let termIndex = 0;
 	let first = -1;
 	let previous = -1;
 	let gaps = 0;
 	let boundaryHits = 0;
-	for (let index = 0; index < source.length && termIndex < term.length; index++) {
-		if (foldedSource[index] !== term[termIndex]) continue;
+	for (let termIndex = 0; termIndex < term.length; termIndex++) {
+		const index = foldedSource.indexOf(term[termIndex]!, previous + 1);
+		if (index < 0) return 0;
 		if (first < 0) first = index;
 		if (previous >= 0) gaps += index - previous - 1;
 		if (isBoundary(source, index)) boundaryHits++;
 		previous = index;
-		termIndex++;
 	}
-	if (termIndex !== term.length) return 0;
 	const density = Math.max(0, term.length * 3 - gaps);
 	// Keep any meaningful filename subsequence above an exact directory-only hit.
 	return (field === 'stem' ? 405 : field === 'name' ? 390 : 35)
@@ -74,17 +69,18 @@ function scoreField(source: string, term: string, field: 'stem' | 'name' | 'dire
 }
 
 /** Precompiles a case-insensitive fuzzy matcher for indexed relative file paths. */
-export function createFileMatcher(query: string): (relativePath: string) => number | null {
+export function createFileMatcher(query: string): (relativePath: string, foldedPath?: string) => number | null {
 	const terms = queryTerms(query);
 	if (terms.length === 0) return () => null;
-	const joinedQuery = terms.map(({ value }) => value).join('');
-	const exactStemBonus = joinedQuery.length > 0 ? BASENAME_STEM_EXACT : 0;
+	const joinedQuery = terms.join('');
 
-	return (relativePath: string): number | null => {
-		const foldedPath = relativePath.slice(0, MAX_MATCHED_PATH_LENGTH).toLowerCase();
+	return (relativePath: string, folded?: string): number | null => {
+		const foldedPath = relativePath.length > MAX_MATCHED_PATH_LENGTH
+			? relativePath.slice(0, MAX_MATCHED_PATH_LENGTH).toLowerCase()
+			: folded ?? relativePath.toLowerCase();
 		// Most indexed paths fail here. This scan is cheaper than splitting paths and
 		// scoring each basename/directory field, and cannot reject a field match.
-		for (const { value: term } of terms) {
+		for (const term of terms) {
 			if (!containsSubsequence(foldedPath, term)) return null;
 		}
 
@@ -92,24 +88,27 @@ export function createFileMatcher(query: string): (relativePath: string) => numb
 		const basename = segments[segments.length - 1];
 		if (!basename) return null;
 		const stem = extensionless(basename);
+		const foldedName = basename.toLowerCase();
+		const foldedStem = stem.toLowerCase();
 		const directories = segments.slice(0, -1);
 
 		let score = 0;
-		for (const { value: term } of terms) {
+		for (const term of terms) {
 			const basenameMatch = Math.max(
-				scoreField(stem, term, 'stem'),
-				scoreField(basename, term, 'name'),
+				scoreField(stem, foldedStem, term, 'stem'),
+				scoreField(basename, foldedName, term, 'name'),
 			);
 			let directoryMatch = 0;
-			for (const directory of directories) {
-				directoryMatch = Math.max(directoryMatch, scoreField(directory, term, 'directory'));
+			// Directory scores cannot exceed 420; avoid rescoring them after a stronger filename hit.
+			if (basenameMatch < 420) for (const directory of directories) {
+				directoryMatch = Math.max(directoryMatch, scoreField(directory, directory.toLowerCase(), term, 'directory'));
 			}
 			const best = Math.max(basenameMatch, directoryMatch);
 			if (best === 0) return null;
 			score += best;
 		}
 
-		if (stem.toLowerCase() === joinedQuery) score += exactStemBonus;
+		if (foldedStem === joinedQuery) score += BASENAME_STEM_EXACT;
 		return score;
 	};
 }

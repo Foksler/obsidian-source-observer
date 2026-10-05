@@ -4,8 +4,12 @@ import { promises as fsp } from 'fs';
 import * as path from 'path';
 import { promisify } from 'util';
 import { runRipgrep } from './rgRunner.ts';
+import { parseRgJson } from './rgParser.ts';
+export { parseRgJson } from './rgParser.ts';
+import { globToRegExp, splitGlobs } from './searchGlobs.ts';
 export { resolveRgExecutable } from './rgRunner.ts';
 import {
+	clearFilePathIndexes,
 	invalidateFileIndex as invalidateSharedFileIndex,
 	searchFilePathIndex,
 	warmFileIndex as warmSharedFileIndex,
@@ -15,6 +19,12 @@ const execFileAsync = promisify(execFile);
 const worktreeCache = new Map<string, { expiresAt: number; roots: string[] }>();
 const canonicalPathCache = new Map<string, string>();
 const MAX_FALLBACK_FILE_BYTES = 5 * 1024 * 1024;
+
+export function clearSearchCaches(): void {
+	clearFilePathIndexes();
+	worktreeCache.clear();
+	canonicalPathCache.clear();
+}
 
 export interface SearchOptions {
 	query: string;
@@ -42,24 +52,10 @@ export interface SearchResultGroup {
 
 export type SearchResultSet = SearchResultGroup[] & { truncated: boolean };
 
-interface RgJsonEvent {
-	type: string;
-	data?: {
-		path?: { text?: string };
-		lines?: { text?: string };
-		line_number?: number;
-		submatches?: Array<{ start: number }>;
-	};
-}
-
 // eslint-disable-next-line obsidianmd/hardcoded-config-path -- Source roots should omit the conventional vault config folder.
 const DEFAULT_IGNORES = ['.git', 'node_modules', '.obsidian', '.cursor', 'vendor', 'dist', 'build', 'coverage', '.next', '.nuxt'];
 const DEFAULT_IGNORED_FILES = ['composer.lock', 'package-lock.json', 'yarn.lock', 'pnpm-lock.yaml', '_ide_helper.php'];
 const CONVENTIONAL_WORKTREE_GLOBS = ['.claude/worktrees', '.worktrees', 'worktrees'];
-
-function splitGlobs(value?: string): string[] {
-	return (value ?? '').split(/[\n,;]/).map((part) => part.trim()).filter(Boolean);
-}
 
 export function makeRgArgs(
 	root: string,
@@ -132,37 +128,6 @@ function mergeSearchResults(results: SearchResultGroup[][], limit: number): Sear
 	return Object.assign([...groups.values()].filter((group) => group.matches.length > 0), { truncated });
 }
 
-export function parseRgJson(output: string, limit = 1000, root?: string): SearchResultGroup[] {
-	const groups = new Map<string, SearchResultGroup>();
-	let count = 0;
-	for (const line of output.split(/\r?\n/)) {
-		if (count >= limit) break;
-		if (!line) continue;
-		let event: RgJsonEvent;
-		try { event = JSON.parse(line) as RgJsonEvent; } catch { continue; }
-		if (event.type !== 'match') continue;
-		const data = event.data;
-		if (data?.path?.text === undefined || data.lines?.text === undefined || typeof data.line_number !== 'number') continue;
-		const rawPath = data.path.text;
-		const filePath = root ? pathInRoot(root, path.resolve(root, rawPath)) : rawPath;
-		const group = groups.get(filePath) ?? { filePath, matches: [] };
-		const text = data.lines.text.replace(/[\r\n]+$/, '');
-		const utf8Line = Buffer.from(text, 'utf8');
-		for (const submatch of data.submatches ?? []) {
-			if (count >= limit) break;
-			group.matches.push({
-				filePath,
-				line: data.line_number,
-				column: byteOffsetToColumn(utf8Line, submatch.start),
-				text,
-			});
-			count++;
-		}
-		groups.set(filePath, group);
-	}
-	return [...groups.values()];
-}
-
 function capGroups(groups: SearchResultGroup[], limit: number): { groups: SearchResultGroup[]; truncated: boolean } {
 	let remaining = limit;
 	let truncated = false;
@@ -175,10 +140,6 @@ function capGroups(groups: SearchResultGroup[], limit: number): { groups: Search
 		remaining -= matches.length;
 	}
 	return { groups: capped, truncated };
-}
-
-function byteOffsetToColumn(utf8Line: Buffer, byteOffset: number): number {
-	return utf8Line.subarray(0, byteOffset).toString('utf8').length + 1;
 }
 
 export function isDefaultExcludedRelativePath(relativePath: string): boolean {
@@ -268,29 +229,6 @@ function canonicalPath(candidate: string): string {
 	return canonical;
 }
 
-function pathInRoot(root: string, candidate: string): string {
-	const relative = path.relative(canonicalPath(root), canonicalPath(candidate));
-	if (!relative.startsWith(`..${path.sep}`) && relative !== '..' && !path.isAbsolute(relative)) {
-		return path.resolve(root, relative);
-	}
-	return candidate;
-}
-
-function globToRegExp(glob: string): RegExp {
-	const normalized = glob.replace(/\\/g, '/');
-	let source = '^';
-	for (let i = 0; i < normalized.length; i++) {
-		const char = normalized[i] ?? '';
-		if (char === '*') {
-			if (normalized[i + 1] === '*' && normalized[i + 2] === '/') { source += '(?:.*/)?'; i += 2; }
-			else if (normalized[i + 1] === '*') { source += '.*'; i++; }
-			else source += '[^/]*';
-		} else if (char === '?') source += '[^/]';
-		else source += char.replace(/[|\\{}()[\]^$+?.]/g, '\\$&');
-	}
-	return new RegExp(`${source}$`);
-}
-
 interface IgnoreRule { base: string; pattern: RegExp; negated: boolean; }
 
 async function readIgnoreRules(dir: string, root: string, inherited: IgnoreRule[]): Promise<IgnoreRule[]> {
@@ -329,8 +267,8 @@ function isIgnoredPath(relative: string, rules: IgnoreRule[]): boolean {
 async function fallbackSearch(root: string, options: SearchOptions, signal: AbortSignal, worktrees: string[]): Promise<SearchResultSet> {
 	const query = options.regex ? new RegExp(options.query, `${options.caseSensitive ? '' : 'i'}g`) : null;
 	const needle = options.caseSensitive ? options.query : options.query.toLocaleLowerCase();
-	const includes = splitGlobs(options.includeGlob).map(globToRegExp);
-	const excludes = splitGlobs(options.excludeGlob).map(globToRegExp);
+	const includes = splitGlobs(options.includeGlob).map((glob) => globToRegExp(glob));
+	const excludes = splitGlobs(options.excludeGlob).map((glob) => globToRegExp(glob));
 	const groups: SearchResultGroup[] = [];
 	const max = options.limit ?? 1000;
 	let truncated = false;
@@ -449,6 +387,7 @@ export async function listFilesDetailed(
 ): Promise<{ files: string[]; truncated: boolean }> {
 	const worktrees = await getRegisteredWorktrees(root);
 	const indexed = await searchFilePathIndex(root, query, {
+		signal,
 		matchMode: 'fuzzy',
 		includeWorktrees,
 		showHidden,

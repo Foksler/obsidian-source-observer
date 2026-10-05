@@ -8,8 +8,8 @@ import { SourceObserverView, VIEW_TYPE } from './view';
 import { normalizeSearchMode } from './searchMode';
 import { normalizeShortcuts } from './searchShortcuts';
 import { ExplorerDock, EXPLORER_VIEW_TYPE, SourceExplorerView } from './explorerDock';
+import { clearSearchCaches } from './searchEngine';
 
-/** Root plugin class — registers the view, ribbon icon, command, and settings tab. */
 export default class SourceObserverPlugin extends Plugin {
 	settings!: SourceObserverSettings;
 	/** Fires 'changed' after settings are persisted so open views can re-render. */
@@ -18,6 +18,7 @@ export default class SourceObserverPlugin extends Plugin {
 
 	async onload() {
 		await this.loadSettings();
+		this.register(clearSearchCaches);
 		this.explorerDock = new ExplorerDock(this.app, () => this.settings.replaceFileExplorer);
 		this.registerView(EXPLORER_VIEW_TYPE, (leaf) => new SourceExplorerView(leaf, () => { void this.activateView(); }));
 
@@ -47,7 +48,6 @@ export default class SourceObserverPlugin extends Plugin {
 
 	onunload() { void this.explorerDock.dispose(); }
 
-	/** Opens the Source Observer tab, reusing an existing leaf if one is already open. */
 	async activateView() {
 		const { workspace } = this.app;
 		const leaves = workspace.getLeavesOfType(VIEW_TYPE);

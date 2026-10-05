@@ -209,6 +209,8 @@ test('filesystem creation events refresh the active tree even in a non-Git folde
 	t.after(() => view.stopWatching());
 	SourceObserverView.prototype.startWatching.call(view);
 	assert.ok(view.watchers.length > 0);
+	// macOS subscribes to FSEvents asynchronously, especially while other test files build bundles.
+	if (process.platform === 'darwin') await new Promise(resolve => setTimeout(resolve, 100));
 	await mkdir(path.join(root, 'created-after-opening'));
 	let timeout;
 	try {
