@@ -186,3 +186,49 @@ test('unchanged refresh preserves existing rows and late refresh cannot replace 
   assert.equal(tree.getSelectedPath(), null);
  } finally { await fixture.cleanup(); }
 });
+
+test('right click selects roots, folders and files without opening or expanding them', async () => {
+ const fixture = await setup();
+ try {
+  const menus = [], selections = [];
+  fixture.tree.onContextMenu = (...args) => menus.push(args);
+  fixture.tree.onPathSelect = selection => selections.push(selection);
+  const rows = fixture.container.querySelectorAll('.so-tree-row');
+  for (const row of rows) {
+   const expanded = row.attrs['aria-expanded'];
+   let prevented = false, stopped = false;
+   const event = { preventDefault() { prevented = true; }, stopPropagation() { stopped = true; } };
+   row.listeners.get('contextmenu')(event);
+   assert.ok(prevented && stopped);
+   assert.equal(row.attrs['aria-expanded'], expanded);
+   assert.equal(row.attrs['aria-selected'], 'true');
+   assert.equal(fixture.container.ownerDocument.activeElement, row);
+   assert.deepEqual(menus.at(-1), [{ path: row.dataset.path, isDirectory: true }, event, row, fixture.root]);
+  }
+  await fixture.tree.reveal(fixture.file);
+  const file = fixture.container.querySelectorAll('.so-tree-row').at(-1);
+  file.listeners.get('contextmenu')({ preventDefault() {}, stopPropagation() {} });
+  assert.deepEqual(menus.at(-1)[0], { path: fixture.file, isDirectory: false });
+  assert.deepEqual(fixture.opened, []);
+  assert.ok(selections.length >= 2);
+ } finally { await fixture.cleanup(); }
+});
+
+test('filtered results support mouse and keyboard context menus, with disposed rows inert', async () => {
+ const fixture = await setup();
+ try {
+  const menus = [];
+  fixture.tree.onContextMenu = selection => menus.push(selection);
+  await fixture.tree.search('Current');
+  const row = fixture.container.querySelectorAll('.so-tree-row')[0];
+  const event = { preventDefault() {}, stopPropagation() {} };
+  row.listeners.get('contextmenu')(event);
+  row.listeners.get('keydown')({ ...event, key: 'F10', shiftKey: true });
+  row.listeners.get('keydown')({ ...event, key: 'ContextMenu' });
+  assert.deepEqual(menus, Array(3).fill({ path: fixture.file, isDirectory: false }));
+  assert.deepEqual(fixture.opened, []);
+  fixture.tree.dispose();
+  row.listeners.get('contextmenu')(event);
+  assert.equal(menus.length, 3);
+ } finally { await fixture.cleanup(); }
+});

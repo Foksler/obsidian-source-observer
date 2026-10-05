@@ -176,6 +176,13 @@ are read-only: navigation, search and diffs never save changes to the codebase.
 - **Folder icons:** bundled Material Icon Theme artwork identifies common project
   folders such as app, config, database, routes and tests. A right-pointing chevron
   marks a collapsed folder; a downward chevron and open icon mark an expanded one.
+- **Context menu:** right-click a file or folder (including the project root and
+  filtered files) for **Copy path**, **Copy relative path**, **Reveal in Finder**,
+  and **Open in terminal**. Relative paths start at the active project folder
+  (`.` for the root itself); **Copy path** uses the absolute path.
+  On macOS, Terminal opens the selected directory or
+  the file's parent; other desktop platforms support copying and revealing only.
+  **Shift+F10** opens the same menu for the focused tree row.
 - **Git:** select **Hide Git changes** to reduce the panel to its header at the
   bottom of the sidebar; select **Restore Git changes** to expand it. The choice
   persists across reloads. Drag the horizontal border above **Changes** to resize

@@ -82,6 +82,7 @@ export class FileTree {
 		showHidden: boolean,
 		onSelect: (filePath: string) => void,
 		private onPathSelect?: (selection: { path: string; isDirectory: boolean }) => void,
+		private onContextMenu?: (selection: { path: string; isDirectory: boolean }, event: MouseEvent | KeyboardEvent, row: HTMLElement, rootPath: string) => void,
 	) {
 		this.container = container;
 		container.setAttribute('role', 'tree');
@@ -210,7 +211,20 @@ export class FileTree {
 		};
 		row.addEventListener('focus', select);
 		row.addEventListener('click', () => { select(); row.focus(); });
+		const showContextMenu = (event: MouseEvent | KeyboardEvent) => {
+			if (!this.onContextMenu || this.disposed) return;
+			event.preventDefault();
+			event.stopPropagation();
+			select();
+			row.focus();
+			this.onContextMenu({ path: filePath, isDirectory }, event, row, this.rootPath);
+		};
+		row.addEventListener('contextmenu', showContextMenu);
 		row.addEventListener('keydown', (event) => {
+			if (event.key === 'ContextMenu' || (event.key === 'F10' && event.shiftKey)) {
+				showContextMenu(event);
+				return;
+			}
 			if (event.ctrlKey || event.metaKey || event.altKey || event.shiftKey) return;
 			const rows = Array.from(this.container.querySelectorAll<HTMLElement>('.so-tree-row')).filter((item) => !item.closest('.so-tree-children-hidden'));
 			const index = rows.indexOf(row);

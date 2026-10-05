@@ -3,6 +3,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import type SourceObserverPlugin from './main';
 import { FileTree } from './fileTree';
+import { showFileContextMenu } from './fileContextMenu';
 import { CodePane, type CodePaneSession } from './codePane';
 import { SearchPanel, type SearchPanelState } from './searchPanel';
 import { EditorTabs, type SourceTab, type EditorTabsState } from './editorTabs';
@@ -208,6 +209,7 @@ export class SourceObserverView extends ItemView {
 			this.plugin.settings.showHidden,
 			(filePath) => { void this.openTab({ filePath, kind: 'code' }); },
 			(selection) => this.setGitContext(selection),
+			showFileContextMenu,
 		);
 
 		this.fileTree.setIncludeWorktrees(this.plugin.settings.includeWorktrees);

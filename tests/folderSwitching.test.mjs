@@ -35,6 +35,7 @@ await build({
 
 			const stubs = {
 				'./fileTree': 'export class FileTree {}',
+				'./fileContextMenu': 'export function showFileContextMenu() {}',
 				'./codePane': 'export class CodePane {}',
 				'./searchPanel': 'export class SearchPanel {}',
 				'./editorTabs': 'export class EditorTabs {}',
