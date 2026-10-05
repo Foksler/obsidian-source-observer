@@ -4,6 +4,9 @@
 	"description": "Browse local codebases, view syntax-highlighted files, and review Git diffs without leaving your vault.",
 	"main": "main.js",
 	"type": "module",
+	"engines": {
+		"node": ">=24"
+	},
 	"scripts": {
 		"dev": "node esbuild.config.mjs",
 		"build": "tsc -noEmit -skipLibCheck && node esbuild.config.mjs production",
@@ -30,7 +33,7 @@
 		"@codemirror/view": "^6.43.1",
 		"@eslint/js": "^9.39.4",
 		"@lezer/highlight": "^1.2.1",
-		"@types/node": "^22.15.17",
+		"@types/node": "^24.19.1",
 		"esbuild": "0.25.5",
 		"eslint": "^9.39.4",
 		"eslint-plugin-import": "^2.32.0",

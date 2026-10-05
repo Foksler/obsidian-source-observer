@@ -48,7 +48,8 @@ npm run dev    # watch mode
 npm run build  # production build
 ```
 
-Use Node.js 22.18 or newer. To install a build, copy the three release files
+Use Node.js 24 or newer. CI checks Node.js 24 and 26; release builds use Node.js 24.
+To install a build, copy the three release files
 from the repository root as described above; preserve an existing `data.json`
 when updating the plugin. This repository is not installed through the Obsidian
 community catalog automatically.
@@ -193,7 +194,7 @@ stops servers when the view closes. No code is uploaded to an external service.
 An optional Intelephense licence is not required for definitions, references,
 hover or symbols. Go to implementation and editing/refactoring are not exposed.
 
-Run the checks with Node.js 22.18 or newer: `npm test`, `npm run lint` and `npm run build` before installing the three
+Run the checks with Node.js 24 or newer: `npm test`, `npm run lint` and `npm run build` before installing the three
 release files into `<vault>/.obsidian/plugins/source-observer/`. The real-server
 test is skipped if Intelephense is absent; search/framing tests always run.
 
