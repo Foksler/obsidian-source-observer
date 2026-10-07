@@ -53,7 +53,7 @@ await build({
 				`,
 				'./searchEngine': `
 					export function getRegisteredWorktrees(root) { return globalThis.__folderSwitchHarness.worktrees(root); }
-					export function invalidateFileIndex() {}
+					export function invalidateFileIndex(root) { globalThis.__folderSwitchHarness.invalidated = root; }
 					export function warmFileIndex() { return Promise.resolve(); }
 				`,
 				'./gitDiff': `
@@ -204,6 +204,42 @@ function setupView(activePath, paths = [activePath]) {
 	});
 	return { view, harness, codePane, editorTabs, searchPanel };
 }
+
+test('trash completion cleans active/saved tabs and recent files; delayed refresh does not change a new folder', async () => {
+ const { view, harness, codePane, editorTabs } = setupView('/one', ['/one', '/two']);
+ const deleted = '/one/delete.ts', kept = '/one/keep.ts';
+ view.recentFiles = [deleted, kept];
+ const location = { filePath: deleted, pos: 1, scrollTop: 0 };
+ const session = { tabs: { tabs: [{ filePath: deleted, kind: 'code' }, { filePath: kept, kind: 'code' }], active: { filePath: deleted, kind: 'code' } },
+  editor: { currentPath: deleted, currentLocation: location, fileLocations: [location], history: [location], forwardHistory: [location] } };
+ view.folderSessions.set('/one', session);
+ codePane.forgetFile = file => { harness.forgotten = file; };
+ editorTabs.closeFile = file => { harness.closedFile = file; };
+ editorTabs.state.active = { filePath: deleted, kind: 'diff' };
+ const refresh = deferred(); let refreshes = 0, gitUpdates = 0;
+ view.fileTree.refresh = () => { refreshes++; return refresh.promise; };
+ view.setGitContext = () => { gitUpdates++; };
+ const deletion = view.onFileDeleted(deleted, '/one');
+ assert.equal(harness.invalidated, '/one');
+ assert.equal(harness.forgotten, deleted); assert.equal(harness.closedFile, deleted);
+ assert.equal(view.diffRequestId, 1); assert.equal(refreshes, 1);
+ assert.deepEqual(view.recentFiles, [kept]);
+ assert.deepEqual(session.tabs, { tabs: [{ filePath: kept, kind: 'code' }], active: { filePath: kept, kind: 'code' } });
+ assert.deepEqual(session.editor, { currentPath: null, currentLocation: null, fileLocations: [], history: [], forwardHistory: [] });
+ view.repoPath = '/two'; refresh.resolve(); await deletion;
+ assert.equal(gitUpdates, 0);
+});
+
+test('trash completion refreshes Git from the surviving selection without cancelling an unrelated diff', async () => {
+ const { view, editorTabs, codePane } = setupView('/one');
+ view.recentFiles = []; codePane.forgetFile = () => {}; editorTabs.closeFile = () => {};
+ editorTabs.state.active = { filePath: '/one/keep.ts', kind: 'diff' };
+ let selection;
+ view.setGitContext = value => { selection = value; };
+ await view.onFileDeleted('/one/delete.ts', '/one');
+ assert.deepEqual(selection, { path: '/one/keep.ts', isDirectory: false });
+ assert.equal(view.diffRequestId, 0);
+});
 
 test('filesystem creation events refresh the active tree even in a non-Git folder', async (t) => {
 	const root = await mkdtemp(path.join(tempDir, 'watch-'));

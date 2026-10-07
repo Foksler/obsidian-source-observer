@@ -54,6 +54,18 @@ export class EditorTabs {
 		this.render();
 	}
 	closeActive() { const tab = this.tabs.find((entry) => this.key(entry) === this.active); if (tab) this.close(tab); }
+	/** Remove code and diff together, without selecting another tab for the deleted file. */
+	closeFile(filePath: string) {
+		const active = this.getActive();
+		const index = this.tabs.findIndex((tab) => this.key(tab) === this.active);
+		this.tabs = this.tabs.filter((tab) => tab.filePath !== filePath);
+		if (active?.filePath === filePath) {
+			const next = this.tabs[Math.min(index, this.tabs.length - 1)];
+			this.active = next ? this.key(next) : '';
+			if (next) this.onSelect(next); else this.onEmpty();
+		}
+		this.render();
+	}
 	reset() { this.tabs = []; this.active = ''; this.render(); }
 	private close(tab: SourceTab) {
 		const index = this.tabs.findIndex((entry) => this.key(entry) === this.key(tab));

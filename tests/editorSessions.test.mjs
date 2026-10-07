@@ -44,6 +44,52 @@ function deferred() {
 	return { promise, resolve };
 }
 
+test('deleting a file closes its code and diff once, preserving other active tabs', () => {
+ const selected = []; let empties = 0;
+ const tabs = new EditorTabs(fakeElement(), tab => selected.push(tab), () => { empties++; });
+ tabs.show({ filePath: '/keep.ts', kind: 'code' });
+ tabs.show({ filePath: '/delete.ts', kind: 'code' });
+ tabs.show({ filePath: '/delete.ts', kind: 'diff' });
+ tabs.closeFile('/delete.ts');
+ assert.deepEqual(selected, [{ filePath: '/keep.ts', kind: 'code' }]);
+ assert.deepEqual(tabs.captureState(), { tabs: selected, active: selected[0] });
+ tabs.show({ filePath: '/background.ts', kind: 'code' });
+ tabs.show({ filePath: '/keep.ts', kind: 'code' });
+ tabs.closeFile('/background.ts');
+ assert.equal(selected.length, 1);
+ assert.equal(tabs.getActive().filePath, '/keep.ts');
+ tabs.closeFile('/keep.ts');
+ assert.equal(empties, 1);
+ assert.deepEqual(tabs.captureState(), { tabs: [], active: null });
+});
+
+test('forgetting a deleted file removes cursor/history and cancels its pending read', () => {
+ const pane = new CodePane(fakeElement(), 15, 'obsidian', () => {});
+ const deleted = { filePath: '/delete.ts', pos: 2, scrollTop: 3 };
+ const kept = { filePath: '/keep.ts', pos: 4, scrollTop: 5 };
+ pane.restoreSession({ currentPath: deleted.filePath, currentLocation: deleted,
+  fileLocations: [deleted, kept], history: [kept, deleted], forwardHistory: [deleted] });
+ pane.pendingPath = deleted.filePath;
+ const request = pane.openRequestId;
+ pane.forgetFile(deleted.filePath);
+ assert.ok(pane.openRequestId > request);
+ assert.deepEqual(pane.captureSession(), { currentPath: null, currentLocation: null,
+  fileLocations: [kept], history: [kept], forwardHistory: [] });
+});
+
+test('forgetting the last code file preserves a visible unrelated diff and another pending open', () => {
+ const container = fakeElement(); let clears = 0;
+ container.empty = () => { clears++; };
+ const pane = new CodePane(container, 15, 'obsidian', () => {});
+ pane.currentPath = '/deleted.ts'; pane.pendingPath = '/next.ts';
+ const request = pane.openRequestId;
+ pane.forgetFile('/deleted.ts');
+ assert.equal(clears, 0);
+ assert.equal(pane.openRequestId, request);
+ assert.equal(pane.pendingPath, '/next.ts');
+ assert.equal(pane.getCurrentFile(), null);
+});
+
 test('CodePane snapshots live cursor, saved files, and both navigation stacks as detached serializable data', () => {
 	const pane = new CodePane(fakeElement(), 15, 'cursor-monokai', () => {});
 	pane.currentPath = '/vault/active.php';

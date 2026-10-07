@@ -209,7 +209,8 @@ export class SourceObserverView extends ItemView {
 			this.plugin.settings.showHidden,
 			(filePath) => { void this.openTab({ filePath, kind: 'code' }); },
 			(selection) => this.setGitContext(selection),
-			showFileContextMenu,
+			(selection, event, row, root) => showFileContextMenu(selection, event, row, root,
+				(filePath, rootPath) => this.onFileDeleted(filePath, rootPath)),
 		);
 
 		this.fileTree.setIncludeWorktrees(this.plugin.settings.includeWorktrees);
@@ -596,6 +597,32 @@ export class SourceObserverView extends ItemView {
 			const filePath = path.isAbsolute(cf.file) ? cf.file : path.join(root, cf.file);
 			void this.openTab({ filePath, kind: 'diff' });
 		});
+	}
+
+	private async onFileDeleted(filePath: string, rootPath: string): Promise<void> {
+		invalidateFileIndex(rootPath);
+		this.recentFiles = this.recentFiles.filter((file) => file !== filePath);
+		for (const session of this.folderSessions.values()) {
+			session.tabs.tabs = session.tabs.tabs.filter((tab) => tab.filePath !== filePath);
+			if (session.tabs.active?.filePath === filePath) session.tabs.active = session.tabs.tabs[0] ?? null;
+			if (session.editor.currentPath === filePath) {
+				session.editor.currentPath = null;
+				session.editor.currentLocation = null;
+			}
+			session.editor.fileLocations = session.editor.fileLocations.filter((entry) => entry.filePath !== filePath);
+			session.editor.history = session.editor.history.filter((entry) => entry.filePath !== filePath);
+			session.editor.forwardHistory = session.editor.forwardHistory.filter((entry) => entry.filePath !== filePath);
+		}
+		if (this.closed) return;
+		this.codePane.forgetFile(filePath);
+		if (this.editorTabs.getActive()?.filePath === filePath) ++this.diffRequestId;
+		this.editorTabs.closeFile(filePath);
+		const activeRoot = this.repoPath;
+		await this.fileTree.refresh();
+		if (this.closed || this.repoPath !== activeRoot) return;
+		const active = this.editorTabs.getActive();
+		this.setGitContext(active ? { path: active.filePath, isDirectory: false }
+			: this.fileTree.getSelectedPath() ?? { path: activeRoot, isDirectory: true });
 	}
 
 	private async openTab(tab: SourceTab) {

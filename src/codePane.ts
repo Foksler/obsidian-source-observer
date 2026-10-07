@@ -128,6 +128,7 @@ export class CodePane {
 	private shortcuts = new Compartment();
 	private currentPath: string | null = null;
 	private openRequestId = 0;
+	private pendingPath: string | null = null;
 	private fileLocations = new Map<string, CodePaneSessionLocation>();
 	/** Positions to return to with Mod-[ after jumping to a definition. */
 	private history: { filePath: string; pos: number; scrollTop: number }[] = [];
@@ -285,6 +286,7 @@ export class CodePane {
 	/** Loads `filePath` into the editor, replacing the current document in place. */
 	async open(filePath: string): Promise<EditorView | null> {
 		const requestId = ++this.openRequestId;
+		this.pendingPath = filePath;
 		let content: string;
 		try {
 			content = await fsp.readFile(filePath, 'utf-8');
@@ -292,6 +294,7 @@ export class CodePane {
 			content = '(cannot read file)';
 		}
 		if (requestId !== this.openRequestId) return null;
+		this.pendingPath = null;
 
 		const langExtension = languageForPath(filePath);
 		const lspExtension = this.lsp?.extensionFor(filePath) ?? [];
@@ -393,9 +396,22 @@ export class CodePane {
 		this.view?.dispatch({ effects: this.theme.reconfigure(syntaxTheme(themeName)) });
 	}
 
+	forgetFile(filePath: string) {
+		if (this.pendingPath === filePath) { ++this.openRequestId; this.pendingPath = null; }
+		if (this.currentPath === filePath) {
+			// A diff can be visible while currentPath still refers to the last code tab.
+			if (this.view) { this.view.destroy(); this.view = null; this.container.empty(); }
+			this.currentPath = null;
+		}
+		this.fileLocations.delete(filePath);
+		this.history = this.history.filter((entry) => entry.filePath !== filePath);
+		this.forwardHistory = this.forwardHistory.filter((entry) => entry.filePath !== filePath);
+	}
+
 	/** Unmounts CodeMirror while retaining this pane's cursor and navigation state. */
 	suspend() {
 		this.openRequestId++;
+		this.pendingPath = null;
 		if (this.view && this.currentPath) {
 			this.fileLocations.set(this.currentPath, {
 				filePath: this.currentPath,

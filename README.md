@@ -13,6 +13,7 @@ The original author's MIT licence and Git history are preserved.
 ## Features
 
 - **File tree** — open any folder, navigate directories, see file-type icons with language colours
+- **File actions** — right-click a tree row or press Shift+F10 to copy its absolute or project-relative path, reveal it in Finder, or open its folder in Terminal on macOS. Files also offer **Delete**, which moves the file to the system Trash and closes its code/diff tabs; folders cannot be deleted.
 - **Syntax highlighting** — PHP, Go, JS/TS, Python, Rust, CSS, HTML, JSON and Markdown; choose Cursor Monokai Pro, VS Code Dark+, One Dark or your Obsidian theme
 - **Language navigation** — local Intelephense for PHP and opt-in gopls for Go: definitions, references, hover documentation and symbols
 - **Quick open** — search filenames and paths with fuzzy matching in a separate keyboard-driven picker
