@@ -13,10 +13,14 @@ export interface ChangedFile {
 /** Number of diff lines appended to the DOM per render batch. */
 const DIFF_BATCH_SIZE = 500;
 
-/** Runs a git command in `cwd` and returns stdout/stderr, swallowing non-zero exit codes. */
+/**
+ * Runs a git command in `cwd` and returns stdout/stderr, swallowing non-zero exit codes.
+ * `--no-optional-locks` keeps read-only commands from refreshing `.git/index`, so they never
+ * hold `index.lock` while the user or an agent runs git in the same repository.
+ */
 async function runGit(cwd: string, args: string[]): Promise<{ stdout: string; stderr: string }> {
 	try {
-		const { stdout, stderr } = await execFileAsync('git', args, { cwd, maxBuffer: 10 * 1024 * 1024 });
+		const { stdout, stderr } = await execFileAsync('git', ['--no-optional-locks', ...args], { cwd, maxBuffer: 10 * 1024 * 1024 });
 		return { stdout, stderr };
 	} catch (err: unknown) {
 		const e = err as { stdout?: string; stderr?: string };
