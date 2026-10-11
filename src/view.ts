@@ -524,9 +524,7 @@ export class SourceObserverView extends ItemView {
 	private setGitContext(context: { path: string; isDirectory: boolean }) {
 		if (this.gitContext?.path === context.path && this.gitContext.isDirectory === context.isDirectory) return;
 		this.gitContext = context;
-		// Hide stale changes while resolving a different repository.
-		this.isRepo = false;
-		this.updateGitVisibility();
+		// Keep the current snapshot visible until the next Git context is resolved.
 		void this.refreshChanges();
 	}
 
@@ -540,6 +538,10 @@ export class SourceObserverView extends ItemView {
 		if (this.closed || root !== this.repoPath || folderRequest !== this.folderRequestId || requestId !== this.gitRequestId) return;
 		const changes = gitRoot ? await getChangedFiles(gitRoot) : [];
 		if (this.closed || root !== this.repoPath || folderRequest !== this.folderRequestId || requestId !== this.gitRequestId) return;
+		const changed = this.gitRoot !== (gitRoot ?? '') || this.isRepo !== !!gitRoot
+			|| changes.length !== this.allChanges.length
+			|| changes.some((change, index) => change.file !== this.allChanges[index]?.file || change.code !== this.allChanges[index]?.code);
+		if (!changed) return;
 		this.gitRoot = gitRoot ?? '';
 		this.isRepo = !!gitRoot;
 		this.allChanges = changes;

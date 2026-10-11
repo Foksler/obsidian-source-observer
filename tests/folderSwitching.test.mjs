@@ -57,7 +57,10 @@ await build({
 					export function warmFileIndex() { return Promise.resolve(); }
 				`,
 				'./gitDiff': `
-					export async function getGitRoot(root) { return await globalThis.__folderSwitchHarness.isGitRepo(root) ? root : null; }
+					export async function getGitRoot(root) {
+						const harness = globalThis.__folderSwitchHarness;
+						return await harness.isGitRepo(root) ? harness.gitRoots.get(root) ?? root : null;
+					}
 					export function getChangedFiles(root) { return globalThis.__folderSwitchHarness.getChangedFiles(root); }
 					export function getFileDiff() { return Promise.resolve(''); }
 					export function renderDiff() {}
@@ -86,11 +89,13 @@ function deferred() {
 function fakeElement() {
 	return {
 		value: '',
-		empty() {},
+		children: [], scrollTop: 0, emptyCalls: 0,
+		empty() { this.children = []; this.scrollTop = 0; this.emptyCalls++; },
 		setText() {}, setAttribute() {},
-		toggleClass() {},
-		createEl() { return fakeElement(); },
-		createSpan() { return fakeElement(); },
+		toggleClass() {}, addClass() {}, addEventListener() {},
+		createEl() { const child = fakeElement(); this.children.push(child); return child; },
+		createSpan() { return this.createEl(); },
+		createDiv() { return this.createEl(); },
 	};
 }
 
@@ -103,6 +108,7 @@ function setupView(activePath, paths = [activePath]) {
 		worktreeResult: new Map(),
 		treeResult: new Map(),
 		gitResult: new Map(),
+		gitRoots: new Map(),
 		changedResult: new Map(),
 		worktrees(root) { this.worktreeCalls.push(root); return this.worktreeResult.get(root)?.promise ?? Promise.resolve([]); },
 		loadTree(root) { this.treeCalls.push(root); return this.treeResult.get(root)?.promise ?? Promise.resolve(); },
@@ -471,6 +477,75 @@ test('late nested Git status cannot show Changes for a newer non-Git selection',
  await view.refreshChanges(); late.resolve(true); await pending;
  assert.equal(view.gitSection.hidden, true);
  assert.equal(view.gitRoot, '');
+});
+
+test('file and folder selections keep Changes visible and preserve rows, badges and scroll when status is unchanged', async () => {
+	const root = '/project';
+	const { view, harness } = setupView(root);
+	const changes = [{ file: 'src/Changed.php', code: ' M' }];
+	harness.changedResult.set(root, { promise: Promise.resolve(changes) });
+	await view.refreshChanges();
+	const row = view.changesContainer.children[0], badge = view.changesCounts.children[0];
+	view.changesContainer.scrollTop = 137;
+	for (const context of [{ path: '/project/src', isDirectory: true }, { path: '/project/src/Changed.php', isDirectory: false }]) {
+		const pending = deferred();
+		harness.gitRoots.set(context.path, root);
+		harness.gitResult.set(context.path, pending);
+		view.setGitContext(context);
+		assert.equal(view.gitSection.hidden, false, 'Changes must stay visible during root resolution');
+		assert.equal(view.gitSplitter.hidden, false);
+		assert.equal(view.changesContainer.children[0], row);
+		harness.changedResult.set(root, { promise: Promise.resolve(changes.map(change => ({ ...change }))) });
+		pending.resolve(true);
+		await new Promise(resolve => setImmediate(resolve));
+		assert.equal(view.changesContainer.children[0], row);
+		assert.equal(view.changesCounts.children[0], badge);
+		assert.equal(view.changesContainer.scrollTop, 137);
+	}
+	await view.refreshChanges(); // Background polling and manual refresh use the same path.
+	assert.equal(view.changesContainer.children[0], row);
+	assert.equal(view.changesContainer.emptyCalls, 1);
+	assert.equal(view.changesCounts.emptyCalls, 1);
+});
+
+test('Changes applies real status updates and replaces identical rows when their repository changes', async () => {
+	const { view, harness } = setupView('/workspace');
+	const changes = [{ file: 'Changed.php', code: ' M' }];
+	harness.changedResult.set('/workspace', { promise: Promise.resolve(changes) });
+	await view.refreshChanges();
+	const firstRow = view.changesContainer.children[0];
+	harness.changedResult.set('/workspace', { promise: Promise.resolve([{ file: 'Changed.php', code: 'A ' }]) });
+	await view.refreshChanges();
+	assert.notEqual(view.changesContainer.children[0], firstRow);
+	assert.equal(view.allChanges[0].code, 'A ');
+	const updatedRow = view.changesContainer.children[0];
+	view.gitContext = { path: '/workspace/nested', isDirectory: true };
+	harness.changedResult.set('/workspace/nested', { promise: Promise.resolve([{ file: 'Changed.php', code: 'A ' }]) });
+	await view.refreshChanges();
+	assert.equal(view.gitRoot, '/workspace/nested');
+	assert.notEqual(view.changesContainer.children[0], updatedRow, 'Row clicks must use the new repository');
+	harness.changedResult.set('/workspace/nested', { promise: Promise.resolve([]) });
+	await view.refreshChanges();
+	assert.deepEqual(view.allChanges, []);
+	assert.equal(view.changesCounts.children.length, 0);
+});
+
+test('late status from an earlier selection cannot overwrite the latest repository', async () => {
+	const { view, harness } = setupView('/workspace');
+	await view.refreshChanges();
+	const late = deferred();
+	harness.changedResult.set('/workspace/old', late);
+	view.setGitContext({ path: '/workspace/old', isDirectory: true });
+	await new Promise(resolve => setImmediate(resolve));
+	harness.changedResult.set('/workspace/new', { promise: Promise.resolve([{ file: 'New.php', code: '??' }]) });
+	view.setGitContext({ path: '/workspace/new', isDirectory: true });
+	await new Promise(resolve => setImmediate(resolve));
+	const currentRow = view.changesContainer.children[0];
+	late.resolve([{ file: 'Old.php', code: ' M' }]);
+	await new Promise(resolve => setImmediate(resolve));
+	assert.equal(view.gitRoot, '/workspace/new');
+	assert.deepEqual(view.allChanges, [{ file: 'New.php', code: '??' }]);
+	assert.equal(view.changesContainer.children[0], currentRow);
 });
 
 test('changing enabled languages replaces navigation and clears search-only clients', () => {
