@@ -234,3 +234,26 @@ test('right-click and Shift+F10 on a file tab open its menu without switching ta
 	assert.deepEqual(selected, []);
 	assert.equal(tabs.getActive().filePath, '/b.ts');
 });
+
+test('closing other, left or right tabs keeps the clicked tab and selects it only when the active tab closes', () => {
+	const selected = [];
+	const tabs = new EditorTabs(fakeElement(), tab => selected.push(tab), () => {});
+	const tab = (name, kind = 'code') => ({ filePath: `/${name}`, kind });
+	const names = () => tabs.captureState().tabs.map(entry => entry.filePath + (entry.kind === 'diff' ? ':diff' : ''));
+	for (const entry of [tab('a.ts'), tab('b.ts'), tab('b.ts', 'diff'), tab('c.ts'), tab('d.ts')]) tabs.show(entry);
+	tabs.show(tab('c.ts'));
+	assert.equal(tabs.canCloseRelative(tab('a.ts'), 'left'), false);
+	assert.equal(tabs.canCloseRelative(tab('d.ts'), 'right'), false);
+	tabs.closeRelative(tab('b.ts'), 'left');
+	assert.deepEqual(names(), ['/b.ts', '/b.ts:diff', '/c.ts', '/d.ts']);
+	assert.deepEqual(selected, []);
+	tabs.closeRelative(tab('b.ts'), 'right');
+	assert.deepEqual(names(), ['/b.ts']);
+	assert.deepEqual(selected, [tab('b.ts')]);
+	assert.deepEqual(tabs.getActive(), tab('b.ts'));
+	assert.equal(tabs.canCloseRelative(tab('b.ts'), 'others'), false);
+	for (const entry of [tab('x.ts'), tab('y.ts')]) tabs.show(entry);
+	tabs.closeRelative(tab('x.ts'), 'others');
+	assert.deepEqual(names(), ['/x.ts']);
+	assert.deepEqual(selected.at(-1), tab('x.ts'));
+});

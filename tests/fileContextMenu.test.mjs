@@ -84,6 +84,14 @@ test('native menu uses the clicked path and reports both copy success and launch
  assert.match(notices.at(-1), /Could not reveal/);
 });
 
+test('caller items such as tab closing come first, separated from the file actions', () => {
+ showFileContextMenu({ path: file, isDirectory: false }, { clientX: 0, clientY: 0 }, {}, root, undefined,
+  menu => menu.addItem(item => item.setTitle('Close others')));
+ const menu = menus.at(-1);
+ assert.deepEqual(menu.items.map(item => item.title), ['Close others', 'Copy path', 'Copy relative path', 'Reveal in Finder', 'Open in terminal', 'Delete']);
+ assert.equal(menu.separator, true);
+});
+
 test('keyboard menu anchors to the row and Terminal is disabled outside macOS', async () => {
  globalThis.__fileMenu.mac = false;
  showFileContextMenu({ path: file, isDirectory: false }, { key: 'ContextMenu' }, { getBoundingClientRect: () => ({ left: 20, bottom: 40 }) }, root);

@@ -55,8 +55,13 @@ export function showFileContextMenu(
 	row: HTMLElement,
 	rootPath: string,
 	onDeleted?: (filePath: string, rootPath: string) => Promise<void>,
+	addLeadingItems?: (menu: Menu) => void,
 ) {
 	const menu = new Menu();
+	if (addLeadingItems) {
+		addLeadingItems(menu);
+		menu.addSeparator();
+	}
 	const addAction = (title: string, icon: string, action: FileAction, failure: string, disabled = false) => {
 		menu.addItem((item) => item.setTitle(title).setIcon(icon).setDisabled(disabled).onClick(async () => {
 			try {

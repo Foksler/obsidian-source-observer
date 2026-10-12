@@ -193,7 +193,13 @@ export class SourceObserverView extends ItemView {
 			this.updatePreviewToggle();
 			this.setGitContext(this.fileTree.getSelectedPath() ?? { path: this.repoPath, isDirectory: true });
 		}, (tab, event, element) => showFileContextMenu({ path: tab.filePath, isDirectory: false }, event, element, this.repoPath,
-			(filePath, rootPath) => this.onFileDeleted(filePath, rootPath)));
+			(filePath, rootPath) => this.onFileDeleted(filePath, rootPath), (menu) => {
+				for (const [title, icon, scope] of [['Close others', 'x', 'others'], ['Close tabs to the left', 'arrow-left-to-line', 'left'],
+					['Close tabs to the right', 'arrow-right-to-line', 'right']] as const) {
+					menu.addItem((item) => item.setTitle(title).setIcon(icon).setDisabled(!this.editorTabs.canCloseRelative(tab, scope))
+						.onClick(() => this.editorTabs.closeRelative(tab, scope)));
+				}
+			}));
 		const pathBar = main.createDiv({ cls: 'so-path-bar' });
 		this.pathLabel = pathBar.createDiv({ cls: 'so-path-label' });
 		this.previewToggle = pathBar.createEl('button', { cls: 'so-search-icon-btn so-preview-toggle' });

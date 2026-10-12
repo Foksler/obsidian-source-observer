@@ -3,6 +3,7 @@ import { setIcon } from 'obsidian';
 
 export interface SourceTab { filePath: string; kind: 'code' | 'diff' }
 export interface EditorTabsState { tabs: SourceTab[]; active: SourceTab | null }
+export type TabCloseScope = 'others' | 'left' | 'right';
 
 function cloneTab(tab: SourceTab): SourceTab {
 	return { filePath: tab.filePath, kind: tab.kind };
@@ -68,6 +69,21 @@ export class EditorTabs {
 		this.render();
 	}
 	reset() { this.tabs = []; this.active = ''; this.render(); }
+	/** Whether closing other, left or right tabs around `tab` would close anything. */
+	canCloseRelative(tab: SourceTab, scope: TabCloseScope) { return this.relatedTabs(tab, scope).length > 0; }
+	/** Closes tabs around `tab`; it becomes active when the active tab is among them. */
+	closeRelative(tab: SourceTab, scope: TabCloseScope) {
+		const closing = new Set(this.relatedTabs(tab, scope).map((entry) => this.key(entry)));
+		if (!closing.size) return;
+		this.tabs = this.tabs.filter((entry) => !closing.has(this.key(entry)));
+		if (closing.has(this.active)) { this.active = this.key(tab); this.onSelect(cloneTab(tab)); }
+		this.render();
+	}
+	private relatedTabs(tab: SourceTab, scope: TabCloseScope) {
+		const index = this.tabs.findIndex((entry) => this.key(entry) === this.key(tab));
+		if (index < 0) return [];
+		return this.tabs.filter((_, position) => scope === 'others' ? position !== index : scope === 'left' ? position < index : position > index);
+	}
 	private close(tab: SourceTab) {
 		const index = this.tabs.findIndex((entry) => this.key(entry) === this.key(tab));
 		this.tabs.splice(index, 1);
