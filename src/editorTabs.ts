@@ -19,7 +19,8 @@ export class EditorTabs {
 	private tabs: SourceTab[] = [];
 	private active = '';
 	constructor(private container: HTMLElement, private onSelect: (tab: SourceTab) => void,
-		private onEmpty: () => void) {
+		private onEmpty: () => void,
+		private onContextMenu?: (tab: SourceTab, event: MouseEvent | KeyboardEvent, element: HTMLElement) => void) {
 		container.addClass('so-tabs');
 		container.setAttribute('role', 'tablist');
 		container.setAttribute('aria-label', 'Open source files');
@@ -85,6 +86,18 @@ export class EditorTabs {
 			const button = wrapper.createEl('button', { cls: 'so-tab-select', text: path.basename(tab.filePath) + (tab.kind === 'diff' ? ' (diff)' : ''),
 				attr: { role: 'tab', 'aria-selected': String(selected), tabindex: selected ? '0' : '-1', title: tab.filePath } });
 			button.addEventListener('click', () => this.onSelect(tab));
+			// Same file actions as the tree; opening the menu does not switch tabs.
+			wrapper.addEventListener('contextmenu', (event) => {
+				if (!this.onContextMenu) return;
+				event.preventDefault();
+				this.onContextMenu(cloneTab(tab), event, wrapper);
+			});
+			button.addEventListener('keydown', (event) => {
+				if (!this.onContextMenu || (event.key !== 'ContextMenu' && !(event.key === 'F10' && event.shiftKey))) return;
+				event.preventDefault();
+				event.stopPropagation();
+				this.onContextMenu(cloneTab(tab), event, wrapper);
+			});
 			const close = wrapper.createEl('button', { cls: 'so-tab-close', attr: { 'aria-label': `Close ${path.basename(tab.filePath)}` } });
 			setIcon(close, 'x'); close.addEventListener('click', () => this.close(tab));
 		}

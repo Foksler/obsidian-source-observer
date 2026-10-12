@@ -209,3 +209,28 @@ test('EditorTabs captures and restores a detached active-tab state without selec
 	state.tabs[0].filePath = '/mutated.php';
 	assert.equal(tabs.captureState().tabs[0].filePath, '/two/B.php');
 });
+
+test('right-click and Shift+F10 on a file tab open its menu without switching tabs', () => {
+	const element = (cls = '') => ({
+		cls, children: [], listeners: {},
+		addClass() {}, setAttribute() {}, empty() { this.children = []; },
+		addEventListener(type, listener) { this.listeners[type] = listener; },
+		createDiv(options) { const child = element(options?.cls); this.children.push(child); return child; },
+		createEl(_tag, options) { return this.createDiv(options); },
+	});
+	const container = element(), selected = [], menus = [];
+	const tabs = new EditorTabs(container, tab => selected.push(tab), () => {},
+		(tab, event, anchor) => menus.push({ tab, key: event.key, anchor }));
+	tabs.show({ filePath: '/a.ts', kind: 'code' });
+	tabs.show({ filePath: '/b.ts', kind: 'diff' });
+	const [first, second] = container.children;
+	let prevented = 0;
+	first.listeners.contextmenu({ preventDefault: () => prevented++ });
+	second.children[0].listeners.keydown({ key: 'F10', shiftKey: true, preventDefault: () => prevented++, stopPropagation() {} });
+	second.children[0].listeners.keydown({ key: 'F10', shiftKey: false, preventDefault: () => prevented++, stopPropagation() {} });
+	assert.deepEqual(menus.map(({ tab, anchor }) => [tab, anchor]), [
+		[{ filePath: '/a.ts', kind: 'code' }, first], [{ filePath: '/b.ts', kind: 'diff' }, second]]);
+	assert.equal(prevented, 2);
+	assert.deepEqual(selected, []);
+	assert.equal(tabs.getActive().filePath, '/b.ts');
+});

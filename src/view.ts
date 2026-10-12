@@ -192,7 +192,8 @@ export class SourceObserverView extends ItemView {
 			++this.diffRequestId; this.codePane.suspend(); this.markdownPreview.clear(); this.pathLabel.setText('');
 			this.updatePreviewToggle();
 			this.setGitContext(this.fileTree.getSelectedPath() ?? { path: this.repoPath, isDirectory: true });
-		});
+		}, (tab, event, element) => showFileContextMenu({ path: tab.filePath, isDirectory: false }, event, element, this.repoPath,
+			(filePath, rootPath) => this.onFileDeleted(filePath, rootPath)));
 		const pathBar = main.createDiv({ cls: 'so-path-bar' });
 		this.pathLabel = pathBar.createDiv({ cls: 'so-path-label' });
 		this.previewToggle = pathBar.createEl('button', { cls: 'so-search-icon-btn so-preview-toggle' });
