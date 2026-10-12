@@ -4,6 +4,7 @@ import { EditorView } from '@codemirror/view';
 import { tags as t } from '@lezer/highlight';
 import type { SyntaxTheme } from './settings';
 import { phpSemicolonTag } from './phpSyntax';
+import { yamlKeyTag } from './yamlSyntax';
 
 export const monokaiHighlight = HighlightStyle.define([
 	{ tag: [t.keyword, t.modifier, t.controlKeyword, t.moduleKeyword], color: '#FF6188' },
@@ -20,6 +21,7 @@ export const monokaiHighlight = HighlightStyle.define([
 	{ tag: [t.operator, t.operatorKeyword], color: '#78DCE8' },
 	{ tag: [t.punctuation, t.separator], color: '#b4adb4' },
 	{ tag: phpSemicolonTag, color: '#d6991e' },
+	{ tag: yamlKeyTag, color: '#FF6188' },
 	{ tag: [t.comment, t.meta], color: '#727072', fontStyle: 'italic' },
 	{ tag: [t.annotation, t.processingInstruction], color: '#AB9DF2' },
 	{ tag: t.heading, color: '#FF6188', fontWeight: 'bold' },

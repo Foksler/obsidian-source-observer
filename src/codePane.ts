@@ -17,6 +17,7 @@ import { html } from '@codemirror/lang-html';
 import { json } from '@codemirror/lang-json';
 import { markdown } from '@codemirror/lang-markdown';
 import { isPhpFile } from './phpFiles';
+import { yamlWithKeyHighlighting } from './yamlSyntax';
 import { normalizeShortcuts, type SearchShortcuts } from './searchShortcuts';
 
 const EXT_LANG: Record<string, () => ReturnType<typeof javascript>> = {
@@ -36,6 +37,8 @@ const EXT_LANG: Record<string, () => ReturnType<typeof javascript>> = {
 	jsonc:() => json(),
 	md:   () => markdown(),
 	mdx:  () => markdown(),
+	yml:  () => yamlWithKeyHighlighting(),
+	yaml: () => yamlWithKeyHighlighting(),
 	php:  () => phpWithSemanticHighlighting(),
 };
 
