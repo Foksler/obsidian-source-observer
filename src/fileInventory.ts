@@ -1,6 +1,7 @@
 import * as path from 'path';
 import { promises as fs, realpathSync } from 'fs';
 import { streamRipgrep } from './rgRunner.ts';
+import { activeExcludedFileRgGlobs, isExcludedFile } from './fileExclusions.ts';
 
 // eslint-disable-next-line obsidianmd/hardcoded-config-path -- Match source filename index exclusions.
 const EXCLUDED_DIRS = new Set(['.git', '.obsidian', 'node_modules']);
@@ -20,11 +21,12 @@ function inventoryScope(root: string, includeWorktrees: boolean, worktreeRoots: 
 	const registered = worktrees.length
 		? new RegExp(`^(?:${worktrees.map(escapeRegExp).join('|')})(?:/|$)`)
 		: null;
-	const excluded = (relative: string) => EXCLUDED_PATH.test(relative)
+	const excluded = (relative: string) => EXCLUDED_PATH.test(relative) || isExcludedFile(relative)
 		|| (!includeWorktrees && (WORKTREE_PATH.test(relative)
 			|| registered?.test(relative) === true));
 	const args = ['--files', '--hidden', '--no-ignore', '--null'];
 	for (const dir of EXCLUDED_DIRS) args.push('--glob', `!**/${dir}`, '--glob', `!**/${dir}/**`);
+	for (const glob of activeExcludedFileRgGlobs()) args.push('--glob', glob);
 	if (!includeWorktrees) {
 		for (const tree of WORKTREE_PATHS) args.push('--glob', `!**/${tree}`, '--glob', `!**/${tree}/**`);
 		for (const tree of worktrees) args.push('--glob', `!${tree}`, '--glob', `!${tree}/**`);

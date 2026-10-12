@@ -3,6 +3,7 @@ import type SourceObserverPlugin from './main';
 import { detectIntelephense, detectNode } from './phpAdapter';
 import { detectGo, detectGopls } from './goAdapter';
 import type { SearchMode } from './searchMode';
+import { DEFAULT_EXCLUDED_FILES, normalizeExcludedFiles } from './fileExclusions';
 import { DEFAULT_SHORTCUTS, SHORTCUT_ACTIONS, shortcutFromEvent, shortcutLabel, sameShortcut, type SearchShortcuts, type ShortcutAction } from './searchShortcuts';
 
 export type SyntaxTheme = 'obsidian' | 'cursor-monokai' | 'dark-plus' | 'one-dark';
@@ -19,6 +20,7 @@ export interface SourceObserverSettings {
 	editorFontFamily: string;
 	editorFontLigatures: boolean;
 	showHidden: boolean;
+	excludedFiles: string[];
 	includeWorktrees: boolean;
 	gitPanelHidden: boolean;
 	syntaxTheme: SyntaxTheme;
@@ -42,6 +44,7 @@ export const DEFAULT_SETTINGS: SourceObserverSettings = {
 	editorFontFamily: 'JetBrains Mono',
 	editorFontLigatures: true,
 	showHidden: true,
+	excludedFiles: DEFAULT_EXCLUDED_FILES,
 	includeWorktrees: false,
 	gitPanelHidden: false,
 	syntaxTheme: 'cursor-monokai',
@@ -237,6 +240,20 @@ export class SourceObserverSettingTab extends PluginSettingTab {
 						await this.plugin.saveSettings();
 					}),
 			);
+
+		new Setting(containerEl)
+			.setName('Excluded files')
+			.setDesc('Hide matching files and folders from the tree, quick open and search. One glob per line; a pattern without a slash matches a name at any depth.')
+			.addTextArea((area) => {
+				// eslint-disable-next-line obsidianmd/ui/sentence-case -- A literal filename example.
+				area.setPlaceholder('.DS_Store').setValue(this.plugin.settings.excludedFiles.join('\n'));
+				area.inputEl.rows = 4;
+				// Apply on blur so a half-typed pattern does not hide files.
+				area.inputEl.addEventListener('change', () => {
+					this.plugin.settings.excludedFiles = normalizeExcludedFiles(area.getValue().split('\n'));
+					void this.plugin.saveSettings();
+				});
+			});
 
 		new Setting(containerEl)
 			.setName('Include worktrees')

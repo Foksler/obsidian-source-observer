@@ -5,6 +5,7 @@ import { setFolderIcon } from './folderIcons';
 import { getRegisteredWorktrees } from './searchEngine';
 import { FILE_SEARCH_RESULTS_CAP, searchFilePathIndex } from './filePathIndex.ts';
 import { refreshTree, type TreeNode } from './fileTreeRefresh';
+import { createExcludedFileMatcher, type ExcludedFileMatcher } from './fileExclusions';
 
 /** Maximum number of search results before showing a "more results" hint. */
 export const SEARCH_RESULTS_CAP = FILE_SEARCH_RESULTS_CAP;
@@ -75,6 +76,8 @@ export class FileTree {
 	private disposed = false;
 	private includeWorktrees = false;
 	private worktreeRoots: string[] | null = null;
+	private excludedFiles: ExcludedFileMatcher = () => false;
+	private excludedFilesKey = '';
 	private selectedPath: { path: string; isDirectory: boolean } | null = null;
 
 	constructor(
@@ -97,6 +100,15 @@ export class FileTree {
 		this.showHidden = showHidden;
 		this.treeRoot = null;
 		if (this.rootPath) void this.loadPath(this.rootPath);
+	}
+
+	/** Hides matching paths, keeping expanded folders open. */
+	async setExcludedFiles(globs: readonly string[]): Promise<void> {
+		const key = globs.join('\n');
+		if (this.excludedFilesKey === key) return;
+		this.excludedFilesKey = key;
+		this.excludedFiles = createExcludedFileMatcher(globs);
+		await this.refresh().catch(() => {});
 	}
 
 	/** Includes conventional and Git-registered nested worktrees in tree operations. */
@@ -355,6 +367,8 @@ export class FileTree {
 		try { entries = await fsp.readdir(dirPath); } catch { return []; }
 		if (generation !== this.loadSeq || this.disposed) return [];
 		if (!this.showHidden) entries = entries.filter((e) => !e.startsWith('.'));
+		const relativeDir = path.relative(this.rootPath, dirPath).split(path.sep).join('/');
+		entries = entries.filter((name) => !this.excludedFiles(relativeDir ? `${relativeDir}/${name}` : name));
 		const visibleEntries = this.includeWorktrees
 			? entries
 			: entries.filter((name) => !this.isWorktreePath(path.join(dirPath, name)));

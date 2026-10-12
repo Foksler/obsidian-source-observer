@@ -6,6 +6,7 @@ import { searchFilePathIndex } from './filePathIndex.ts';
 import { getRegisteredWorktrees, type SearchOptions } from './searchEngine.ts';
 import { searchContentPage } from './contentSearchPage.ts';
 import { containsFile, searchRoots } from './searchRoots.ts';
+import { isExcludedFile } from './fileExclusions.ts';
 import type { LspSymbol } from './lspWorkspace';
 
 export const SEARCH_TABS = ['all', 'files', 'classes', 'symbols', 'actions', 'text'] as const;
@@ -83,6 +84,7 @@ async function recentResults(context: EverywhereContext, worktrees: string[], si
 		// eslint-disable-next-line obsidianmd/hardcoded-config-path -- Match file index exclusions.
 		if (parts.some((part) => ['.git', '.obsidian', 'node_modules'].includes(part))) return null;
 		if (!context.showHidden && parts.some((part) => part.startsWith('.'))) return null;
+		if (isExcludedFile(parts.join('/'))) return null;
 		if (!context.includeWorktrees && (parts.some((part) => ['worktrees', '.worktrees'].includes(part))
 			|| parts.join('/').includes('.claude/worktrees/')
 			|| worktrees.some((root) => filePath === root || filePath.startsWith(`${root}${path.sep}`)))) return null;
@@ -156,7 +158,9 @@ export async function searchEverywhere(context: EverywhereContext, tab: SearchTa
 				const symbols = await context.symbols!(query, root);
 				const results = symbolResults(root, symbols, query, tab === 'classes').filter((result) => {
 					const relative = path.relative(root, result.filePath!);
-					return containsFile(root, result.filePath!) && (context.showHidden || !relative.split(path.sep).some((part) => part.startsWith('.')));
+					const parts = relative.split(path.sep);
+					return containsFile(root, result.filePath!) && (context.showHidden || !parts.some((part) => part.startsWith('.')))
+						&& !isExcludedFile(parts.join('/'));
 				});
 				return { results, total: results.length };
 			});

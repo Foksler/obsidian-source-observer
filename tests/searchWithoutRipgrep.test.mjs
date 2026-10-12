@@ -7,6 +7,7 @@ import { searchContentPage } from '../src/contentSearchPage.ts';
 import { resolveRgExecutable, streamRipgrep } from '../src/rgRunner.ts';
 import { searchContent } from '../src/searchEngine.ts';
 import { collectFilePaths, inventoryFilePaths } from '../src/fileInventory.ts';
+import { setExcludedFiles } from '../src/fileExclusions.ts';
 
 // Node runs each test file in its own process, keeping discovery's cached result isolated.
 before(() => {
@@ -90,4 +91,21 @@ test('filename fallback shares exclusions, skips cycles and bounds its parallel 
 	const controller = new AbortController();
 	controller.abort();
 	await assert.rejects(collectFilePaths(root, false, roots, controller.signal, 3), /cancelled/i);
+});
+
+test('fallback search and filename enumeration honour plugin exclusions', async (t) => {
+	const root = await fixture(t);
+	for (const name of ['.DS_Store', 'src/.DS_Store', 'src/app.ts', 'out/main.js', 'src/out/gen.ts']) {
+		await fs.mkdir(path.dirname(path.join(root, name)), { recursive: true });
+		await fs.writeFile(path.join(root, name), 'needle');
+	}
+	setExcludedFiles(['.DS_Store', '/out']);
+	t.after(() => setExcludedFiles([]));
+	const expected = ['src/app.ts', 'src/out/gen.ts'];
+	const signal = new AbortController().signal;
+	const files = [];
+	await inventoryFilePaths(root, false, [], signal, (_file, relative) => files.push(relative));
+	assert.deepEqual(files.sort(), expected);
+	const groups = await searchContent(root, { query: 'needle' }, signal);
+	assert.deepEqual(groups.map((group) => path.relative(root, group.filePath)).sort(), expected);
 });

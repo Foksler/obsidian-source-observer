@@ -7,6 +7,7 @@ import { runRipgrep } from './rgRunner.ts';
 import { parseRgJson } from './rgParser.ts';
 export { parseRgJson } from './rgParser.ts';
 import { globToRegExp, splitGlobs } from './searchGlobs.ts';
+import { activeExcludedFileRgGlobs, isExcludedFile } from './fileExclusions.ts';
 export { resolveRgExecutable } from './rgRunner.ts';
 import {
 	clearFilePathIndexes,
@@ -77,6 +78,7 @@ export function makeRgArgs(
 		args.push('--glob', `!${glob}`, '--glob', `!**/${glob}/**`);
 	}
 	for (const file of DEFAULT_IGNORED_FILES) args.push('--glob', `!${file}`, '--glob', `!**/${file}`);
+	for (const glob of activeExcludedFileRgGlobs()) args.push('--glob', glob);
 	if (!options.includeWorktrees) {
 		for (const glob of CONVENTIONAL_WORKTREE_GLOBS) {
 			args.push('--glob', `!${glob}`, '--glob', `!${glob}/**`, '--glob', `!**/${glob}`, '--glob', `!**/${glob}/**`);
@@ -157,7 +159,8 @@ function isConventionalWorktreeRelativePath(relativePath: string): boolean {
 
 function isAlwaysExcludedRelativePath(relativePath: string): boolean {
 	const parts = relativePath.split(/[\\/]+/).filter(Boolean);
-	return parts.some((part) => DEFAULT_IGNORES.includes(part) || DEFAULT_IGNORED_FILES.includes(part));
+	return parts.some((part) => DEFAULT_IGNORES.includes(part) || DEFAULT_IGNORED_FILES.includes(part))
+		|| isExcludedFile(parts.join('/'));
 }
 
 export async function getRegisteredWorktrees(root: string): Promise<string[]> {

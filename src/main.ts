@@ -9,6 +9,7 @@ import { normalizeSearchMode } from './searchMode';
 import { normalizeShortcuts } from './searchShortcuts';
 import { ExplorerDock, EXPLORER_VIEW_TYPE, SourceExplorerView } from './explorerDock';
 import { clearSearchCaches } from './searchEngine';
+import { normalizeExcludedFiles, setExcludedFiles } from './fileExclusions';
 
 export default class SourceObserverPlugin extends Plugin {
 	settings!: SourceObserverSettings;
@@ -80,9 +81,13 @@ export default class SourceObserverPlugin extends Plugin {
 		this.settings.searchMode = normalizeSearchMode(this.settings.searchMode);
 		this.settings.shortcuts = normalizeShortcuts(this.settings.shortcuts);
 		this.settings.replaceFileExplorer = this.settings.replaceFileExplorer === true;
+		this.settings.excludedFiles = normalizeExcludedFiles(this.settings.excludedFiles);
+		setExcludedFiles(this.settings.excludedFiles);
 	}
 
 	async saveSettings() {
+		// Cached filename indexes were built with the previous exclusions.
+		if (setExcludedFiles(this.settings.excludedFiles)) clearSearchCaches();
 		await this.saveData(this.settings);
 		this.settingsEvents.trigger('changed');
 		await this.explorerDock.update();

@@ -21,6 +21,7 @@ import type { SearchTab, SearchAction, EverywhereResult } from './searchEverywhe
 import { getRegisteredWorktrees, invalidateFileIndex, warmFileIndex } from './searchEngine';
 import { LspNavigation, navigationAdapters } from './lspNavigation';
 import { getChangedFiles, getFileDiff, getGitRoot, renderDiff, ChangedFile } from './gitDiff';
+import { isExcludedFile } from './fileExclusions';
 
 export const VIEW_TYPE = 'source-observer';
 
@@ -214,6 +215,7 @@ export class SourceObserverView extends ItemView {
 		);
 
 		this.fileTree.setIncludeWorktrees(this.plugin.settings.includeWorktrees);
+		void this.fileTree.setExcludedFiles(this.plugin.settings.excludedFiles);
 		const searchContainer = sections.createDiv({ cls: 'so-workspace-search' });
 		sections.insertBefore(searchContainer, gitSplitter);
 		this.searchPanel = new SearchPanel(searchContainer, (filePath, line, column) => {
@@ -251,6 +253,7 @@ export class SourceObserverView extends ItemView {
 			this.codePane.setTheme(this.plugin.settings.syntaxTheme);
 			this.fileTree.setShowHidden(this.plugin.settings.showHidden);
 			this.fileTree.setIncludeWorktrees(this.plugin.settings.includeWorktrees);
+			void this.fileTree.setExcludedFiles(this.plugin.settings.excludedFiles);
 			this.searchPanel.setIncludeWorktrees(this.plugin.settings.includeWorktrees);
 			this.searchPanel.setShowHidden(this.plugin.settings.showHidden);
 			this.updateGitVisibility();
@@ -417,6 +420,7 @@ export class SourceObserverView extends ItemView {
 				if (event !== 'rename') return; // Content edits do not change file paths.
 				const parts = filename?.toString().split(/[\\/]/) ?? [];
 				if (parts.some((part) => ['.git', this.app.vault.configDir, 'node_modules'].includes(part))) return;
+				if (isExcludedFile(parts.join('/'))) return;
 				if (!this.plugin.settings.includeWorktrees && filename) {
 					const fullPath = path.resolve(root, filename.toString());
 					if (this.indexedWorktrees.some((worktree) => fullPath === worktree || fullPath.startsWith(`${worktree}${path.sep}`))) return;
