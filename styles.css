@@ -27,49 +27,69 @@
 .so-sidebar-sections:has(> .so-section > .so-section-body-hidden) > .so-search-preview-splitter { display: none; }
 .so-sidebar-sections:has(> .so-files-section > .so-section-body-hidden) > .so-git-section:not(.so-git-collapsed):not(:has(> .so-section-body-hidden)) { flex: 1; }
 
+/* Folder tabs mirror Obsidian's sidebar tab headers and follow the theme's tab variables. */
 .so-folder-tabs {
 	display: flex;
-	align-items: stretch;
-	min-height: 36px;
+	align-items: center;
+	gap: 3px;
 	flex-shrink: 0;
+	padding: 7px 8px;
 	overflow-x: auto;
-	border-bottom: 1px solid var(--background-modifier-border);
-	background: var(--background-secondary);
+	scrollbar-width: none;
+	border-bottom: var(--tab-outline-width, 1px) solid var(--tab-outline-color, var(--background-modifier-border));
+	background: var(--tab-container-background, var(--background-secondary));
 }
+.so-folder-tabs::-webkit-scrollbar { display: none; }
 .so-folder-tab {
 	display: flex;
 	align-items: center;
+	gap: var(--size-2-1, 2px);
 	flex: 0 0 auto;
-	max-width: 230px;
-	border-right: 1px solid var(--background-modifier-border);
-	border-bottom: 2px solid transparent;
+	max-width: 200px;
+	height: 25px;
+	padding: 0 8px;
+	border-radius: var(--tab-radius, 8px);
+	color: var(--tab-text-color-focused, var(--text-muted));
 }
+.so-folder-tab:hover { background: var(--background-modifier-hover); }
 .so-folder-tab-active {
-	background: var(--background-primary);
-	border-bottom-color: var(--interactive-accent);
+	padding-right: 4px;
+	background: var(--background-modifier-hover);
+	color: var(--tab-text-color-focused-active-current, var(--text-normal));
 }
-.so-folder-tab-select,
-.so-folder-tab-close {
-	background: transparent;
-	border: 0;
-	box-shadow: none;
-	border-radius: 0;
-	color: var(--text-muted);
-	cursor: pointer;
-}
-.so-folder-tab-select {
+.so-folder-tab:has(.so-folder-tab-select:focus-visible) { box-shadow: 0 0 0 2px var(--background-modifier-border-focus); }
+/* Outrank Obsidian's default button chrome. */
+.so-folder-tabs button.so-folder-tab-select,
+.so-folder-tabs button.so-folder-tab-select:hover,
+.so-folder-tabs button.so-folder-tab-select:focus-visible {
 	min-width: 0;
-	padding: 7px 8px;
+	height: auto;
+	padding: 0;
+	border: 0;
+	border-radius: 0;
+	box-shadow: none;
+	outline: none;
+	background: transparent;
+	color: inherit;
+	font-size: var(--tab-font-size, 13px);
+	font-weight: var(--tab-font-weight, inherit);
 	overflow: hidden;
 	text-overflow: ellipsis;
 	white-space: nowrap;
-	font-size: 12px;
+	cursor: var(--cursor, pointer);
 }
-.so-folder-tab-active .so-folder-tab-select { color: var(--text-normal); }
-.so-folder-tab-close { padding: 0 6px; font-size: 18px; }
-.so-folder-tab-select:hover,
-.so-folder-tab-close:hover { background: var(--background-modifier-hover); }
-.so-folder-tabs-empty { padding: 8px 10px; color: var(--text-muted); }
+/* Like Obsidian's tabs, only the active tab shows its close button; middle-click closes any tab. */
+.so-folder-tabs .so-folder-tab-close {
+	display: none;
+	flex-shrink: 0;
+	padding: var(--size-2-1, 2px);
+	border-radius: var(--radius-s, 4px);
+	color: inherit;
+	--icon-size: var(--icon-xs, 14px);
+	--icon-stroke: var(--icon-xs-stroke-width, 2px);
+}
+.so-folder-tabs .so-folder-tab-active .so-folder-tab-close { display: flex; }
+.so-folder-tabs-empty { padding: 0 4px; color: var(--text-muted); font-size: var(--font-ui-small, 13px); }
 
 /* ── Collapsible section ─────────────────────────────────────── */
 .so-section {

@@ -1,4 +1,5 @@
 import * as path from 'path';
+import { setIcon } from 'obsidian';
 
 /** Accessible tab strip for open source folders. */
 export class FolderTabs {
@@ -65,6 +66,12 @@ export class FolderTabs {
 			const selected = folderPath === this.activePath;
 			const wrapper = this.container.ownerDocument.createElement('div');
 			wrapper.className = `so-folder-tab${selected ? ' so-folder-tab-active' : ''}`;
+			// Middle-click closes a tab, as in Obsidian's tab bar.
+			wrapper.addEventListener('auxclick', (event) => {
+				if (event.button !== 1) return;
+				event.preventDefault();
+				this.onClose(folderPath);
+			});
 
 			const select = this.container.ownerDocument.createElement('button');
 			select.type = 'button';
@@ -79,9 +86,9 @@ export class FolderTabs {
 
 			const close = this.container.ownerDocument.createElement('button');
 			close.type = 'button';
-			close.className = 'so-folder-tab-close';
+			close.className = 'so-folder-tab-close clickable-icon';
 			close.dataset.folderPath = folderPath;
-			close.textContent = '×';
+			setIcon(close, 'x');
 			close.setAttribute('aria-label', `Close ${labels.get(folderPath) ?? path.basename(folderPath)}`);
 			close.title = `Close ${folderPath}`;
 			close.addEventListener('click', (event) => {
