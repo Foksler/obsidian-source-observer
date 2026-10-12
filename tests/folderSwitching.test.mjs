@@ -43,6 +43,10 @@ await build({
 				'./symbolPicker': 'export class SymbolPicker {}',
 				'./filePicker': 'export class FilePicker {}',
 				'./searchEverywhereModal': 'export class SearchEverywhereModal {}',
+				'./markdownPreview': `
+					export class MarkdownPreview {}
+					export function isMarkdownFile(filePath) { return filePath.endsWith('.md'); }
+				`,
 				'./lspNavigation': `
 					export class LspNavigation {
 						constructor(options, adapters) { this.options = options; this.adapters = adapters; this.disposed = false; }
@@ -183,6 +187,13 @@ function setupView(activePath, paths = [activePath]) {
 		editorTabs,
 		searchPanel,
 		fileTree,
+		markdownPreview: {
+			shown: [], cleared: 0,
+			async show(container, filePath, isCurrent) { if (isCurrent()) this.shown.push(filePath); },
+			clear() { this.cleared++; },
+		},
+		previewToggle: fakeElement(),
+		previewFiles: new Set(),
 		folderTabs: { setFolders() {}, dispose() {} },
 		pathLabel: fakeElement(),
 		changesContainer: fakeElement(),
@@ -268,6 +279,28 @@ test('filesystem creation events refresh the active tree even in a non-Git folde
 			timeout = setTimeout(() => reject(new Error('Tree did not refresh after directory creation')), 3000);
 		})]), root);
 	} finally { clearTimeout(timeout); }
+});
+
+test('Markdown preview toggles inside its code tab and is restored after a folder switch', async () => {
+	const a = '/tmp/source-observer-folder-a', b = '/tmp/source-observer-folder-b';
+	const readme = `${a}/README.md`;
+	const { view, codePane, editorTabs } = setupView(a, [a, b]);
+	view.recentFiles = [];
+	editorTabs.state = { tabs: [{ filePath: `${a}/A.php`, kind: 'code' }], active: { filePath: `${a}/A.php`, kind: 'code' } };
+	await view.toggleMarkdownPreview();
+	assert.equal(view.previewFiles.size, 0);
+	editorTabs.state = { tabs: [{ filePath: readme, kind: 'code' }], active: { filePath: readme, kind: 'code' } };
+	await view.toggleMarkdownPreview();
+	assert.deepEqual(view.markdownPreview.shown, [readme]);
+	assert.deepEqual(editorTabs.state.tabs, [{ filePath: readme, kind: 'code' }]);
+	assert.equal(view.previewToggle.hidden, false);
+	await view.activateFolder(b);
+	await view.activateFolder(a);
+	assert.deepEqual(view.markdownPreview.shown, [readme, readme]);
+	assert.deepEqual(codePane.opened, []);
+	await view.toggleMarkdownPreview();
+	assert.deepEqual(codePane.opened, [readme]);
+	assert.equal(view.previewFiles.has(readme), false);
 });
 
 test('backup polling refreshes the tree when filesystem events are missed', async () => {

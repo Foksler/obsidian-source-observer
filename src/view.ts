@@ -22,6 +22,7 @@ import { getRegisteredWorktrees, invalidateFileIndex, warmFileIndex } from './se
 import { LspNavigation, navigationAdapters } from './lspNavigation';
 import { getChangedFiles, getFileDiff, getGitRoot, renderDiff, ChangedFile } from './gitDiff';
 import { isExcludedFile } from './fileExclusions';
+import { MarkdownPreview, isMarkdownFile } from './markdownPreview';
 
 export const VIEW_TYPE = 'source-observer';
 
@@ -53,6 +54,10 @@ export class SourceObserverView extends ItemView {
 	plugin: SourceObserverPlugin;
 	private fileTree!: FileTree;
 	private codePane!: CodePane;
+	private markdownPreview!: MarkdownPreview;
+	private previewToggle!: HTMLButtonElement;
+	/** Markdown code tabs that show the rendered file instead of its source. */
+	private previewFiles = new Set<string>();
 	private languageNavigation: LspNavigation | null = null;
 	private lspKey = '';
 	private rightPane!: HTMLElement;
@@ -182,11 +187,16 @@ export class SourceObserverView extends ItemView {
 		this.addToolbarButton(toolbar, 'shapes', 'Go to symbol', () => this.showSymbols(false));
 		this.addToolbarButton(toolbar, 'corner-down-right', 'Go to definition (F12)', () => { const view = this.codePane.getEditor(); if (view) this.languageNavigation?.jumpToDefinition(view); });
 		this.addToolbarButton(toolbar, 'list', 'Find references (Shift+F12)', () => { const view = this.codePane.getEditor(); if (view) this.languageNavigation?.findReferences(view); });
+		this.markdownPreview = this.addChild(new MarkdownPreview(this.app));
 		this.editorTabs = new EditorTabs(main.createDiv(), (tab) => { void this.openTab(tab); }, () => {
-			++this.diffRequestId; this.codePane.suspend(); this.pathLabel.setText('');
+			++this.diffRequestId; this.codePane.suspend(); this.markdownPreview.clear(); this.pathLabel.setText('');
+			this.updatePreviewToggle();
 			this.setGitContext(this.fileTree.getSelectedPath() ?? { path: this.repoPath, isDirectory: true });
 		});
-		this.pathLabel = main.createDiv({ cls: 'so-path-label' });
+		const pathBar = main.createDiv({ cls: 'so-path-bar' });
+		this.pathLabel = pathBar.createDiv({ cls: 'so-path-label' });
+		this.previewToggle = pathBar.createEl('button', { cls: 'so-search-icon-btn so-preview-toggle' });
+		this.registerDomEvent(this.previewToggle, 'click', () => { void this.toggleMarkdownPreview(); });
 		this.rightPane = main.createDiv({ cls: 'so-pane' });
 
 		this.codePane = new CodePane(
@@ -194,10 +204,11 @@ export class SourceObserverView extends ItemView {
 			this.plugin.settings.fontSize,
 			this.plugin.settings.syntaxTheme,
 			(filePath) => {
-				this.recentFiles = [filePath, ...this.recentFiles.filter((file) => file !== filePath)].slice(0, 50);
-				this.pathLabel.setText(path.relative(this.repoPath, filePath) || filePath);
-				this.editorTabs.show({ filePath, kind: 'code' });
-				this.setGitContext({ path: filePath, isDirectory: false });
+				// Source replaces any diff or preview that is still loading.
+				++this.diffRequestId;
+				this.previewFiles.delete(filePath);
+				this.markdownPreview.clear();
+				this.fileShown(filePath);
 			},
 			this.plugin.settings.editorFontFamily,
 			this.plugin.settings.editorFontLigatures,
@@ -361,8 +372,10 @@ export class SourceObserverView extends ItemView {
 		this.allChanges = [];
 		const session = this.folderSessions.get(dir);
 		this.codePane.restoreSession(session?.editor ?? null);
+		this.markdownPreview.clear();
 		this.editorTabs.restoreState(session?.tabs ?? null);
 		this.pathLabel.setText('');
+		this.updatePreviewToggle();
 		this.treeSearchInput.value = session?.treeQuery ?? '';
 		this.changesQuery = session?.changesQuery ?? '';
 		this.changesSearchInput.value = this.changesQuery;
@@ -394,7 +407,8 @@ export class SourceObserverView extends ItemView {
 		if (requestId !== this.folderRequestId || this.closed) return;
 		this.startWatching();
 		const active = this.editorTabs.getActive();
-		if (active?.kind === 'code') await this.codePane.open(active.filePath);
+		if (active?.kind === 'code' && this.previewFiles.has(active.filePath)) await this.showPreview(active.filePath);
+		else if (active?.kind === 'code') await this.codePane.open(active.filePath);
 		else if (active) await this.openTab(active);
 		if (requestId !== this.folderRequestId || this.closed) return;
 		// Interval-based poll covers anything fs.watch misses (untracked
@@ -608,6 +622,7 @@ export class SourceObserverView extends ItemView {
 	private async onFileDeleted(filePath: string, rootPath: string): Promise<void> {
 		invalidateFileIndex(rootPath);
 		this.recentFiles = this.recentFiles.filter((file) => file !== filePath);
+		this.previewFiles.delete(filePath);
 		for (const session of this.folderSessions.values()) {
 			session.tabs.tabs = session.tabs.tabs.filter((tab) => tab.filePath !== filePath);
 			if (session.tabs.active?.filePath === filePath) session.tabs.active = session.tabs.tabs[0] ?? null;
@@ -633,6 +648,10 @@ export class SourceObserverView extends ItemView {
 
 	private async openTab(tab: SourceTab) {
 		if (this.plugin.explorerDock?.isDocked(this)) await this.app.workspace.revealLeaf(this.leaf);
+		if (tab.kind === 'code' && this.previewFiles.has(tab.filePath)) {
+			await this.showPreview(tab.filePath);
+			return;
+		}
 		const requestId = ++this.diffRequestId;
 		if (tab.kind === 'code') {
 			this.codePane.rememberPosition();
@@ -640,12 +659,46 @@ export class SourceObserverView extends ItemView {
 			return;
 		}
 		this.codePane.suspend();
+		this.markdownPreview.clear();
 		this.editorTabs.show(tab);
+		this.updatePreviewToggle();
 		this.setGitContext({ path: tab.filePath, isDirectory: false });
 		this.pathLabel.setText(path.relative(this.repoPath, tab.filePath) + ' (diff)');
 		const diff = await getFileDiff(path.dirname(tab.filePath), tab.filePath);
 		if (requestId !== this.diffRequestId || this.closed) return;
 		renderDiff(this.rightPane, diff);
+	}
+
+	/** Records a file shown in the main pane, either as source or as a preview. */
+	private fileShown(filePath: string) {
+		this.recentFiles = [filePath, ...this.recentFiles.filter((file) => file !== filePath)].slice(0, 50);
+		this.pathLabel.setText(path.relative(this.repoPath, filePath) || filePath);
+		this.editorTabs.show({ filePath, kind: 'code' });
+		this.setGitContext({ path: filePath, isDirectory: false });
+		this.updatePreviewToggle();
+	}
+
+	private async showPreview(filePath: string) {
+		this.codePane.suspend();
+		this.fileShown(filePath);
+		const requestId = ++this.diffRequestId;
+		await this.markdownPreview.show(this.rightPane, filePath, () => !this.closed && requestId === this.diffRequestId);
+	}
+
+	private async toggleMarkdownPreview() {
+		const active = this.editorTabs.getActive();
+		if (this.closed || active?.kind !== 'code' || !isMarkdownFile(active.filePath)) return;
+		if (!this.previewFiles.delete(active.filePath)) this.previewFiles.add(active.filePath);
+		await this.openTab(active);
+	}
+
+	private updatePreviewToggle() {
+		const active = this.editorTabs.getActive();
+		this.previewToggle.hidden = active?.kind !== 'code' || !isMarkdownFile(active.filePath);
+		if (!active || this.previewToggle.hidden) return;
+		const preview = this.previewFiles.has(active.filePath);
+		this.previewToggle.setAttribute('aria-label', preview ? 'Show source' : 'Show preview');
+		setIcon(this.previewToggle, preview ? 'file-code' : 'book-open');
 	}
 
 	private addToolbarButton(parent: HTMLElement, icon: string, label: string, callback: () => void) {

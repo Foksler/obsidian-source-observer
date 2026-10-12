@@ -342,25 +342,42 @@
 	min-width: 0;
 }
 
+.so-path-bar {
+	display: flex;
+	align-items: center;
+	border-bottom: 1px solid var(--background-modifier-border);
+	background: var(--background-secondary);
+	flex-shrink: 0;
+	min-height: 24px;
+}
+.so-path-bar:has(> .so-path-label:empty) { display: none; }
+
 .so-path-label {
+	flex: 1;
+	min-width: 0;
 	padding: 5px 12px;
 	font-size: 11px;
 	color: var(--text-muted);
 	font-family: var(--font-monospace);
-	border-bottom: 1px solid var(--background-modifier-border);
-	background: var(--background-secondary);
 	white-space: nowrap;
 	overflow: hidden;
 	text-overflow: ellipsis;
-	flex-shrink: 0;
-	min-height: 24px;
 }
+
+.so-preview-toggle { flex-shrink: 0; margin-right: 6px; }
+.so-preview-toggle[hidden] { display: none; }
+.so-preview-toggle svg { width: 15px; height: 15px; }
 
 .so-pane {
 	flex: 1;
 	overflow: auto;
 	min-height: 0;
 }
+
+/* ── Markdown preview ────────────────────────────────────────── */
+.so-markdown-preview { min-height: 100%; padding: 16px 32px 48px; }
+.so-markdown-preview > .markdown-preview-sizer { max-width: var(--file-line-width); margin: 0 auto; }
+.so-cursor-theme .so-markdown-preview { background: #2c2a2ed9; }
 
 /* ── Diff rendering ──────────────────────────────────────────── */
 .so-diff-clean {
@@ -427,7 +444,7 @@
 .so-search-match-text { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-family: var(--font-monospace); font-size: 11px; }
 .so-search-status, .so-symbol-detail { color: var(--text-muted); font-size: 11px; padding: 4px; }
 .so-cursor-theme { color: #fcfcfa; --text-normal: #fcfcfa; --text-muted: #b4adb4; --text-faint: #8b888f; --background-modifier-border: #49464c; --background-modifier-hover: #c7c5c11e; --background-modifier-active-hover: #ddaf095f; }
-.so-cursor-theme .so-sidebar, .so-cursor-theme .so-path-label { background: var(--background-secondary); }
+.so-cursor-theme .so-sidebar, .so-cursor-theme .so-path-bar { background: var(--background-secondary); }
 .so-cursor-theme .so-tree-row-active { background: #ddaf095f; color: #fcfcfa; }
 .so-cursor-theme .so-badge-modified, .so-cursor-theme .so-count-modified { color: #e99434fc; }
 .so-cursor-theme .so-badge-added, .so-cursor-theme .so-count-new { color: #34c03d; }
