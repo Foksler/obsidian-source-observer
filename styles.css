@@ -46,7 +46,7 @@
 	gap: var(--size-2-1, 2px);
 	flex: 0 0 auto;
 	max-width: 200px;
-	height: 25px;
+	height: calc(var(--so-sidebar-font-size, 12px) + 13px);
 	padding: 0 8px;
 	border-radius: var(--tab-radius, 8px);
 	color: var(--tab-text-color-focused, var(--text-muted));
@@ -71,7 +71,7 @@
 	outline: none;
 	background: transparent;
 	color: inherit;
-	font-size: var(--tab-font-size, 13px);
+	font-size: calc(var(--so-sidebar-font-size, 12px) + 1px);
 	font-weight: var(--tab-font-weight, inherit);
 	overflow: hidden;
 	text-overflow: ellipsis;
@@ -89,7 +89,7 @@
 	--icon-stroke: var(--icon-xs-stroke-width, 2px);
 }
 .so-folder-tabs .so-folder-tab-active .so-folder-tab-close { display: flex; }
-.so-folder-tabs-empty { padding: 0 4px; color: var(--text-muted); font-size: var(--font-ui-small, 13px); }
+.so-folder-tabs-empty { padding: 0 4px; color: var(--text-muted); font-size: calc(var(--so-sidebar-font-size, 12px) + 1px); }
 
 /* ── Collapsible section ─────────────────────────────────────── */
 .so-section {
@@ -128,7 +128,7 @@
 }
 
 .so-section-title {
-	font-size: 10px;
+	font-size: calc(var(--so-sidebar-font-size, 12px) - 1px);
 	font-weight: 700;
 	text-transform: uppercase;
 	letter-spacing: 0.07em;
@@ -145,7 +145,7 @@
 
 /* Count badges */
 .so-count-badge {
-	font-size: 10px;
+	font-size: calc(var(--so-sidebar-font-size, 12px) - 2px);
 	font-weight: 700;
 	font-family: var(--font-monospace);
 	padding: 0 5px;
@@ -194,7 +194,7 @@
 	border: 1px solid var(--background-modifier-border);
 	background: var(--background-primary);
 	color: var(--text-normal);
-	font-size: 12px;
+	font-size: var(--so-sidebar-font-size, 12px);
 	outline: none;
 	flex-shrink: 0;
 }
@@ -204,14 +204,14 @@
 .so-search-empty {
 	display: block;
 	padding: 4px 10px;
-	font-size: 12px;
+	font-size: var(--so-sidebar-font-size, 12px);
 	color: var(--text-muted);
 }
 
 .so-search-more {
 	display: block;
 	padding: 4px 10px;
-	font-size: 11px;
+	font-size: calc(var(--so-sidebar-font-size, 12px) - 1px);
 	font-style: italic;
 	color: var(--text-faint);
 }
@@ -247,26 +247,26 @@
 	display: flex;
 	align-items: center;
 	justify-content: center;
-	width: 16px;
+	width: calc(var(--so-sidebar-font-size, 12px) + 4px);
 	flex-shrink: 0;
 }
-.so-tree-icon svg { width: 13px; height: 13px; }
+.so-tree-icon svg { width: calc(var(--so-sidebar-font-size, 12px) + 1px); height: calc(var(--so-sidebar-font-size, 12px) + 1px); }
 
 /* Folder */
 .so-tree-chevron {
 	display: flex;
 	align-items: center;
 	justify-content: center;
-	width: 12px;
-	height: 16px;
+	width: var(--so-sidebar-font-size, 12px);
+	height: calc(var(--so-sidebar-font-size, 12px) + 4px);
 	flex-shrink: 0;
 	color: var(--text-muted);
 }
-.so-tree-chevron svg { width: 12px; height: 12px; }
+.so-tree-chevron svg { width: var(--so-sidebar-font-size, 12px); height: var(--so-sidebar-font-size, 12px); }
 .so-material-folder-icon {
-	height: 16px;
+	height: calc(var(--so-sidebar-font-size, 12px) + 4px);
 	background-image: var(--so-folder-icon);
-	background-size: 16px 16px;
+	background-size: calc(var(--so-sidebar-font-size, 12px) + 4px) calc(var(--so-sidebar-font-size, 12px) + 4px);
 	background-repeat: no-repeat;
 	background-position: center;
 }
@@ -296,7 +296,7 @@
 .so-tree-label {
 	overflow: hidden;
 	text-overflow: ellipsis;
-	font-size: 12px;
+	font-size: var(--so-sidebar-font-size, 12px);
 }
 .so-tree-dir > .so-tree-label { font-weight: 600; }
 .so-tree-children-hidden { display: none; }
@@ -312,7 +312,7 @@
 .so-changes-empty {
 	display: block;
 	padding: 4px 10px;
-	font-size: 12px;
+	font-size: var(--so-sidebar-font-size, 12px);
 	color: var(--text-muted);
 }
 
@@ -330,7 +330,7 @@
 .so-change-row.so-change-row-active { background: var(--background-modifier-active-hover); }
 
 .so-change-badge {
-	font-size: 10px;
+	font-size: calc(var(--so-sidebar-font-size, 12px) - 2px);
 	font-weight: 700;
 	font-family: var(--font-monospace);
 	width: 16px;
@@ -342,14 +342,14 @@
 .so-badge-deleted  { color: #f87171; }
 
 .so-change-file {
-	font-size: 12px;
+	font-size: var(--so-sidebar-font-size, 12px);
 	overflow: hidden;
 	text-overflow: ellipsis;
 	color: var(--text-normal);
 }
 
 .so-change-dir {
-	font-size: 11px;
+	font-size: calc(var(--so-sidebar-font-size, 12px) - 1px);
 	color: var(--text-faint);
 }
 
@@ -450,18 +450,18 @@
 .so-search-panel { display: flex; flex-direction: column; min-height: 0; height: 100%; gap: 5px; padding: 7px; }
 .so-search-toolbar { display: flex; gap: 4px; flex-wrap: wrap; }
 .so-search-query { min-width: 80px; flex: 1; width: 100%; }
-.so-search-mode { width: 100%; font-size: 12px; }
+.so-search-mode { width: 100%; font-size: var(--so-sidebar-font-size, 12px); }
 .so-search-options { display: flex; gap: 5px; flex-wrap: wrap; }
-.so-search-option { display: inline-flex; align-items: center; gap: 3px; font-size: 11px; }
+.so-search-option { display: inline-flex; align-items: center; gap: 3px; font-size: calc(var(--so-sidebar-font-size, 12px) - 1px); }
 .so-search-option input { margin: 0; }
 .so-search-globs { display: flex; flex-direction: column; gap: 4px; }
-.so-search-globs input { width: 100%; font-size: 11px; }
+.so-search-globs input { width: 100%; font-size: calc(var(--so-sidebar-font-size, 12px) - 1px); }
 .so-search-results { flex: 1; min-height: 0; overflow: auto; }
-.so-search-file { font-size: 12px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; padding: 5px 3px; }
+.so-search-file { font-size: var(--so-sidebar-font-size, 12px); font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; padding: 5px 3px; }
 .so-search-match { display: flex; gap: 6px; cursor: pointer; width: 100%; padding: 3px; text-align: left; }
 .so-search-match:hover, .so-search-file-result:hover { background: var(--background-modifier-hover); }
 .so-search-line-number { color: var(--text-muted); min-width: 3ch; text-align: right; }
-.so-search-match-text { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-family: var(--font-monospace); font-size: 11px; }
+.so-search-match-text { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-family: var(--font-monospace); font-size: calc(var(--so-sidebar-font-size, 12px) - 1px); }
 .so-search-status, .so-symbol-detail { color: var(--text-muted); font-size: 11px; padding: 4px; }
 .so-cursor-theme { color: #fcfcfa; --text-normal: #fcfcfa; --text-muted: #b4adb4; --text-faint: #8b888f; --background-modifier-border: #49464c; --background-modifier-hover: #c7c5c11e; --background-modifier-active-hover: #ddaf095f; }
 .so-cursor-theme .so-sidebar, .so-cursor-theme .so-path-bar { background: var(--background-secondary); }
@@ -476,7 +476,7 @@
 .so-search-panel button { box-shadow: none; border: 0; background: transparent; color: inherit; border-radius: 3px; height: auto; }
 .so-search-panel .so-search-file { display: block; text-align: left; width: 100%; }
 .so-search-highlight { background: #ddaf095f; color: inherit; }
-.so-search-summary { font-size: 11px; color: var(--text-muted); }
+.so-search-summary { font-size: calc(var(--so-sidebar-font-size, 12px) - 1px); color: var(--text-muted); }
 /* Keep controls readable when the vault itself uses a light theme. */
 .so-root button.so-search-icon-btn, .so-root button.so-tab-select, .so-root button.so-tab-close { background: transparent; box-shadow: none; border: none; color: var(--text-muted); }
 .so-root button.so-search-icon-btn:hover, .so-root button.so-tab-close:hover { background: var(--background-modifier-hover); color: var(--text-normal); }
@@ -484,7 +484,7 @@
 .so-cursor-theme input::placeholder { color: #8b888f; }
 .so-root button.so-tab-select { color: var(--text-normal); }
 .so-root button.so-section-toggle { background: transparent; border: 0; box-shadow: none; padding: 0; height: auto; color: var(--text-muted); text-align: left; justify-content: flex-start; }
-.so-root .so-section-title { text-transform: none; font-size: 11px; letter-spacing: 0; }
+.so-root .so-section-title { text-transform: none; font-size: calc(var(--so-sidebar-font-size, 12px) - 1px); letter-spacing: 0; }
 .so-root .cm-lsp-reference-panel { max-height: 260px; overflow: auto; }
 .so-root .cm-lsp-reference-file { color: #e2d08f; font-weight: 600; padding: 5px; }
 .so-root .cm-lsp-reference { cursor: pointer; padding: 3px 6px; white-space: pre; }

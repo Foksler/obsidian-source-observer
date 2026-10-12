@@ -17,6 +17,7 @@ export interface SourceObserverSettings {
 	lastOpenedPath: string;
 	openedFolderPaths: string[] | null;
 	fontSize: number;
+	sidebarFontSize: number;
 	editorFontFamily: string;
 	editorFontLigatures: boolean;
 	showHidden: boolean;
@@ -41,6 +42,7 @@ export const DEFAULT_SETTINGS: SourceObserverSettings = {
 	lastOpenedPath: '',
 	openedFolderPaths: null,
 	fontSize: 15,
+	sidebarFontSize: 12,
 	editorFontFamily: 'JetBrains Mono',
 	editorFontLigatures: true,
 	showHidden: true,
@@ -139,6 +141,20 @@ export class SourceObserverSettingTab extends PluginSettingTab {
 					.setDynamicTooltip()
 					.onChange(async (value) => {
 						this.plugin.settings.fontSize = value;
+						await this.plugin.saveSettings();
+					}),
+			);
+
+		new Setting(containerEl)
+			.setName('Sidebar font size')
+			.setDesc('Text size of folder tabs, the file tree, changes and sidebar search in px')
+			.addSlider((slider) =>
+				slider
+					.setLimits(10, 20, 1)
+					.setValue(this.plugin.settings.sidebarFontSize)
+					.setDynamicTooltip()
+					.onChange(async (value) => {
+						this.plugin.settings.sidebarFontSize = value;
 						await this.plugin.saveSettings();
 					}),
 			);

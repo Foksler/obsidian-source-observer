@@ -130,6 +130,9 @@ export class SourceObserverView extends ItemView {
 
 		// ── Left sidebar ──────────────────────────────────────────────
 		const sidebar = root.createDiv({ cls: 'so-sidebar' });
+		// The sidebar moves into Obsidian's Files panel when docked, so its size travels with it.
+		const applySidebarFontSize = () => sidebar.setCssProps({ '--so-sidebar-font-size': `${this.plugin.settings.sidebarFontSize}px` });
+		applySidebarFontSize();
 		registerDoubleShiftSearch(this, root,
 			() => !this.closed && this.plugin.settings.searchMode === 'phpstorm' && this.plugin.settings.doubleShiftSearch !== false,
 			() => this.app.workspace.getActiveViewOfType(SourceObserverView) === this || this.plugin.explorerDock.isActive(this),
@@ -268,6 +271,7 @@ export class SourceObserverView extends ItemView {
 			root.toggleClass('so-cursor-theme', this.plugin.settings.syntaxTheme === 'cursor-monokai');
 			this.codePane.setFontOptions(this.plugin.settings.editorFontFamily, this.plugin.settings.editorFontLigatures);
 			this.codePane.setFontSize(this.plugin.settings.fontSize);
+			applySidebarFontSize();
 			this.codePane.setTheme(this.plugin.settings.syntaxTheme);
 			this.fileTree.setShowHidden(this.plugin.settings.showHidden);
 			this.fileTree.setIncludeWorktrees(this.plugin.settings.includeWorktrees);
