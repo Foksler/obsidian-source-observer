@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { mkdtemp, mkdir, rename, writeFile, rm } from 'node:fs/promises';
+import { mkdtemp, mkdir, rename, writeFile, rm, symlink } from 'node:fs/promises';
 import path from 'node:path';
 import os from 'node:os';
 import { build } from 'esbuild';
@@ -231,4 +231,43 @@ test('filtered results support mouse and keyboard context menus, with disposed r
   row.listeners.get('contextmenu')(event);
   assert.equal(menus.length, 3);
  } finally { await fixture.cleanup(); }
+});
+
+test('symlinked folders expand through the link, keep in-root paths and mark broken links', async () => {
+ const fixture = await setup();
+ const outside = await mkdtemp(path.join(os.tmpdir(), 'so-link-target-'));
+ try {
+  const { tree, root, container } = fixture;
+  await mkdir(path.join(outside, 'skills'));
+  await writeFile(path.join(outside, 'skills', 'SKILL.md'), '# skill');
+  await writeFile(path.join(outside, 'CLAUDE.md'), '# memory');
+  await symlink(path.join(outside, 'skills'), path.join(root, 'skills'));
+  await symlink(path.join(outside, 'CLAUDE.md'), path.join(root, 'CLAUDE.md'));
+  await symlink(path.join(root, 'missing'), path.join(root, 'broken'));
+  await symlink(root, path.join(root, 'src', 'cycle'));
+  await tree.loadPath(root);
+  const rowFor = target => container.querySelectorAll('.so-tree-row').find(row => row.dataset.path === target);
+  const skills = rowFor(path.join(root, 'skills')), memory = rowFor(path.join(root, 'CLAUDE.md')), broken = rowFor(path.join(root, 'broken'));
+  assert.equal(skills.dataset.directory, 'true');
+  assert.ok(skills.classes.has('so-tree-symlink'));
+  assert.equal(skills.title, `Link → ${path.join(outside, 'skills')}`);
+  assert.equal(memory.dataset.directory, 'false');
+  assert.ok(memory.classes.has('so-tree-symlink'));
+  assert.equal(broken.dataset.directory, 'false');
+  assert.ok(broken.classes.has('so-tree-symlink-broken'));
+  const skill = path.join(root, 'skills', 'SKILL.md');
+  assert.equal(await tree.reveal(skill), true);
+  assert.deepEqual(tree.getSelectedPath(), { path: skill, isDirectory: false });
+  // A link back to the root opens one level per step instead of recursing.
+  assert.equal(await tree.reveal(path.join(root, 'src', 'cycle', 'src', 'nested', 'Current.php')), true);
+  const menus = [];
+  tree.onContextMenu = selection => menus.push(selection);
+  rowFor(path.join(root, 'skills')).listeners.get('contextmenu')({ preventDefault() {}, stopPropagation() {} });
+  assert.deepEqual(menus, [{ path: path.join(root, 'skills'), isDirectory: true, isSymlink: true }]);
+  await rm(path.join(root, 'broken'));
+  await symlink(path.join(outside, 'skills'), path.join(root, 'broken'));
+  await tree.refresh();
+  assert.equal(rowFor(path.join(root, 'broken')).dataset.directory, 'true');
+  assert.equal(rowFor(path.join(root, 'broken')).classes.has('so-tree-symlink-broken'), false);
+ } finally { await fixture.cleanup(); await rm(outside, { recursive: true, force: true }); }
 });

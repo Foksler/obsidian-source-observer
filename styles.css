@@ -300,6 +300,13 @@
 }
 .so-tree-dir > .so-tree-label { font-weight: 600; }
 .so-tree-children-hidden { display: none; }
+.so-tree-link-badge {
+	display: flex;
+	flex-shrink: 0;
+	color: var(--text-faint);
+}
+.so-tree-link-badge svg { width: calc(var(--so-sidebar-font-size, 12px) - 2px); height: calc(var(--so-sidebar-font-size, 12px) - 2px); }
+.so-tree-symlink-broken > .so-tree-label { color: var(--text-faint); }
 
 /* ── Changes list ────────────────────────────────────────────── */
 .so-changes {

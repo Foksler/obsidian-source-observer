@@ -195,6 +195,23 @@ test('Delete trashes symlinks themselves, including broken links and links to di
  assert.equal((await lstat(directory)).isDirectory(), true);
 });
 
+test('Delete on a link to a folder trashes only the link, without the folder prompt', async () => {
+ const link = path.join(root, 'linked-folder');
+ await symlink(directory, link);
+ const asked = [], deleted = [];
+ showFileContextMenu({ path: link, isDirectory: true, isSymlink: true }, { clientX: 0 }, {}, root, {
+  confirmFolderDelete: async target => { asked.push(target); return true; },
+  onDeleted: async target => { deleted.push(target); },
+ });
+ await menus.at(-1).items.at(-1).click();
+ assert.deepEqual(asked, []);
+ assert.deepEqual(calls, [['trash', link]]);
+ assert.deepEqual(deleted, [link]);
+ assert.deepEqual(notices, ['Link moved to trash.']);
+ assert.equal((await lstat(path.join(trash, 'linked-folder'))).isSymbolicLink(), true);
+ assert.equal(await readFile(file, 'utf8'), 'export {};');
+});
+
 test('stale file menus reject replacement directories; trash failures preserve the file and skip refresh', async () => {
  const target = path.join(root, 'stale.ts');
  await writeFile(target, 'keep');

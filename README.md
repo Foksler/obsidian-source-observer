@@ -12,8 +12,8 @@ The original author's MIT licence and Git history are preserved.
 
 ## Features
 
-- **File tree** — open any folder, navigate directories, see file-type icons with language colours
-- **File actions** — right-click a tree row or press Shift+F10 to copy its absolute or project-relative path, reveal it in Finder, or open its folder in Terminal on macOS. Files and folders also offer **Delete**, which moves them to the system Trash and closes the code/diff tabs of everything removed; folders ask for confirmation first, and the open folder itself cannot be deleted.
+- **File tree** — open any folder, navigate directories, see file-type icons with language colours. Symlinks open like their targets, so a link to a folder expands in place; they are marked ↗ with the target in the tooltip, and broken links are dimmed. Search and the filename index do not follow them.
+- **File actions** — right-click a tree row or press Shift+F10 to copy its absolute or project-relative path, reveal it in Finder, or open its folder in Terminal on macOS. Files and folders also offer **Delete**, which moves them to the system Trash and closes the code/diff tabs of everything removed; folders ask for confirmation first, and the open folder itself cannot be deleted. Deleting a symlink trashes the link only, never its target.
 - **Syntax highlighting** — PHP, Go, JS/TS, Python, Rust, CSS, HTML, JSON, YAML and Markdown; choose Cursor Monokai Pro, VS Code Dark+, One Dark or your Obsidian theme
 - **Language navigation** — local Intelephense for PHP and opt-in gopls for Go: definitions, references, hover documentation and symbols
 - **Quick open** — search filenames and paths with fuzzy matching in a separate keyboard-driven picker

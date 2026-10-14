@@ -61,7 +61,7 @@ export interface FileMenuOptions {
 
 /** Native Obsidian menu, shared by tree rows, filtered results and source tabs. */
 export function showFileContextMenu(
-	selection: { path: string; isDirectory: boolean },
+	selection: { path: string; isDirectory: boolean; isSymlink?: boolean },
 	event: MouseEvent | KeyboardEvent,
 	row: HTMLElement,
 	rootPath: string,
@@ -86,12 +86,14 @@ export function showFileContextMenu(
 	addAction('Open in terminal', 'terminal', 'terminal', 'Could not open Terminal for this path.', !Platform.isMacOS);
 	// The open folder itself is never offered for deletion.
 	if (isInside(path.resolve(rootPath), path.resolve(selection.path))) {
-		const kind = selection.isDirectory ? 'Folder' : 'File';
+		// A link to a folder is trashed as a link: no folder prompt, and its target stays untouched.
+		const folder = selection.isDirectory && !selection.isSymlink;
+		const kind = selection.isSymlink ? 'Link' : folder ? 'Folder' : 'File';
 		menu.addSeparator();
 		menu.addItem((item) => item.setTitle('Delete').setIcon('trash-2').onClick(async () => {
 			const targetPath = selection.path;
-			if (selection.isDirectory && options.confirmFolderDelete && !await options.confirmFolderDelete(targetPath)) return;
-			try { await runFileAction(selection.isDirectory ? 'delete-folder' : 'delete', targetPath, rootPath); }
+			if (folder && options.confirmFolderDelete && !await options.confirmFolderDelete(targetPath)) return;
+			try { await runFileAction(folder ? 'delete-folder' : 'delete', targetPath, rootPath); }
 			catch { new Notice(`Could not move this ${kind.toLowerCase()} to trash.`); return; }
 			new Notice(`${kind} moved to trash.`);
 			try { await options.onDeleted?.(targetPath, rootPath); }
