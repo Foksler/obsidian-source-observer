@@ -85,8 +85,8 @@ test('native menu uses the clicked path and reports both copy success and launch
 });
 
 test('caller items such as tab closing come first, separated from the file actions', () => {
- showFileContextMenu({ path: file, isDirectory: false }, { clientX: 0, clientY: 0 }, {}, root, undefined,
-  menu => menu.addItem(item => item.setTitle('Close others')));
+ showFileContextMenu({ path: file, isDirectory: false }, { clientX: 0, clientY: 0 }, {}, root,
+  { addLeadingItems: menu => menu.addItem(item => item.setTitle('Close others')) });
  const menu = menus.at(-1);
  assert.deepEqual(menu.items.map(item => item.title), ['Close others', 'Copy path', 'Copy relative path', 'Reveal in Finder', 'Open in terminal', 'Delete']);
  assert.equal(menu.separator, true);
@@ -117,19 +117,17 @@ test('relative copying uses the menu project root, including folders and the roo
  await assert.rejects(runFileAction('copy-relative', file), /project root/);
 });
 
-test('Delete is file-only and moves a file to trash before refreshing the view', async () => {
- for (const folder of [root, directory]) {
-  showFileContextMenu({ path: folder, isDirectory: true }, { clientX: 0 }, {}, root);
-  assert.equal(menus.at(-1).items.some(item => item.title === 'Delete'), false);
- }
+test('Delete moves a file to trash before refreshing the view; the open folder itself has no Delete', async () => {
+ showFileContextMenu({ path: root, isDirectory: true }, { clientX: 0 }, {}, root);
+ assert.equal(menus.at(-1).items.some(item => item.title === 'Delete'), false);
  const target = path.join(directory, 'delete me.ts');
  await writeFile(target, 'recoverable content');
  let refreshed = false;
- showFileContextMenu({ path: target, isDirectory: false }, { clientX: 0 }, {}, root, async (deleted, project) => {
+ showFileContextMenu({ path: target, isDirectory: false }, { clientX: 0 }, {}, root, { onDeleted: async (deleted, project) => {
   assert.equal(deleted, target); assert.equal(project, root);
   await assert.rejects(lstat(target), { code: 'ENOENT' });
   refreshed = true;
- });
+ } });
  const menu = menus.at(-1);
  assert.equal(menu.separator, true);
  await menu.items.at(-1).click();
@@ -137,6 +135,36 @@ test('Delete is file-only and moves a file to trash before refreshing the view',
  assert.deepEqual(calls, [['trash', target]]);
  assert.equal(await readFile(path.join(trash, 'delete me.ts'), 'utf8'), 'recoverable content');
  assert.deepEqual(notices, ['File moved to trash.']);
+});
+
+test('folder Delete asks first, then trashes the folder with its contents and refreshes the view', async () => {
+ const folder = path.join(root, 'folder to delete');
+ await mkdir(path.join(folder, 'nested'), { recursive: true });
+ await writeFile(path.join(folder, 'nested', 'kept.ts'), 'recoverable');
+ const asked = [], deleted = [];
+ let answer = false;
+ showFileContextMenu({ path: folder, isDirectory: true }, { clientX: 0 }, {}, root, {
+  confirmFolderDelete: async target => { asked.push(target); return answer; },
+  onDeleted: async (target, project) => { deleted.push([target, project]); },
+ });
+ const deleteItem = menus.at(-1).items.at(-1);
+ assert.equal(deleteItem.title, 'Delete');
+ await deleteItem.click();
+ assert.deepEqual(asked, [folder]);
+ assert.deepEqual(calls, []);
+ assert.equal((await lstat(folder)).isDirectory(), true);
+ answer = true;
+ await deleteItem.click();
+ assert.deepEqual(calls, [['trash', folder]]);
+ assert.deepEqual(deleted, [[folder, root]]);
+ assert.equal(await readFile(path.join(trash, 'folder to delete', 'nested', 'kept.ts'), 'utf8'), 'recoverable');
+ assert.deepEqual(notices, ['Folder moved to trash.']);
+ const replaced = path.join(root, 'replaced');
+ await writeFile(replaced, 'file now');
+ calls.length = 0;
+ await assert.rejects(runFileAction('delete-folder', replaced, root), /Only folders/);
+ await assert.rejects(runFileAction('delete-folder', root, root), /outside the project root/);
+ assert.deepEqual(calls, []);
 });
 
 test('Delete rejects directories, missing paths, outside paths and symlinked outside parents', async () => {
@@ -171,7 +199,7 @@ test('stale file menus reject replacement directories; trash failures preserve t
  const target = path.join(root, 'stale.ts');
  await writeFile(target, 'keep');
  let refreshes = 0;
- showFileContextMenu({ path: target, isDirectory: false }, { clientX: 0 }, {}, root, async () => { refreshes++; });
+ showFileContextMenu({ path: target, isDirectory: false }, { clientX: 0 }, {}, root, { onDeleted: async () => { refreshes++; } });
  const deleteItem = menus.at(-1).items.at(-1);
  globalThis.__fileMenu.trashError = new Error('trash unavailable');
  await deleteItem.click();
@@ -189,7 +217,7 @@ test('stale file menus reject replacement directories; trash failures preserve t
 test('refresh failure reports that trashing succeeded', async () => {
  const target = path.join(root, 'refresh-error.ts');
  await writeFile(target, 'content');
- showFileContextMenu({ path: target, isDirectory: false }, { clientX: 0 }, {}, root, async () => { throw new Error('view failed'); });
+ showFileContextMenu({ path: target, isDirectory: false }, { clientX: 0 }, {}, root, { onDeleted: async () => { throw new Error('view failed'); } });
  await menus.at(-1).items.at(-1).click();
  await assert.rejects(lstat(target), { code: 'ENOENT' });
  assert.deepEqual(notices, ['File moved to trash.', 'File moved to trash, but the view could not refresh.']);

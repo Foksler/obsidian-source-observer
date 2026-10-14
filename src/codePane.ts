@@ -19,6 +19,7 @@ import { markdown } from '@codemirror/lang-markdown';
 import { isPhpFile } from './phpFiles';
 import { yamlWithKeyHighlighting } from './yamlSyntax';
 import { normalizeShortcuts, type SearchShortcuts } from './searchShortcuts';
+import { containsFile } from './searchRoots';
 
 const EXT_LANG: Record<string, () => ReturnType<typeof javascript>> = {
 	go:   () => go(),
@@ -399,16 +400,18 @@ export class CodePane {
 		this.view?.dispatch({ effects: this.theme.reconfigure(syntaxTheme(themeName)) });
 	}
 
-	forgetFile(filePath: string) {
-		if (this.pendingPath === filePath) { ++this.openRequestId; this.pendingPath = null; }
-		if (this.currentPath === filePath) {
+	/** Drops a deleted file, or every file inside a deleted folder. */
+	forgetFile(deletedPath: string) {
+		const removed = (filePath: string) => containsFile(deletedPath, filePath);
+		if (this.pendingPath && removed(this.pendingPath)) { ++this.openRequestId; this.pendingPath = null; }
+		if (this.currentPath && removed(this.currentPath)) {
 			// A diff can be visible while currentPath still refers to the last code tab.
 			if (this.view) { this.view.destroy(); this.view = null; this.container.empty(); }
 			this.currentPath = null;
 		}
-		this.fileLocations.delete(filePath);
-		this.history = this.history.filter((entry) => entry.filePath !== filePath);
-		this.forwardHistory = this.forwardHistory.filter((entry) => entry.filePath !== filePath);
+		for (const filePath of [...this.fileLocations.keys()]) if (removed(filePath)) this.fileLocations.delete(filePath);
+		this.history = this.history.filter((entry) => !removed(entry.filePath));
+		this.forwardHistory = this.forwardHistory.filter((entry) => !removed(entry.filePath));
 	}
 
 	/** Unmounts CodeMirror while retaining this pane's cursor and navigation state. */

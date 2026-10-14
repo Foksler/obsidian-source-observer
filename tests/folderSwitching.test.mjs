@@ -36,6 +36,7 @@ await build({
 			const stubs = {
 				'./fileTree': 'export class FileTree {}',
 				'./fileContextMenu': 'export function showFileContextMenu() {}',
+				'./confirmModal': 'export function confirmAction() { return Promise.resolve(false); }',
 				'./codePane': 'export class CodePane {}',
 				'./searchPanel': 'export class SearchPanel {}',
 				'./editorTabs': 'export class EditorTabs {}',
@@ -236,7 +237,7 @@ test('trash completion cleans active/saved tabs and recent files; delayed refres
  const refresh = deferred(); let refreshes = 0, gitUpdates = 0;
  view.fileTree.refresh = () => { refreshes++; return refresh.promise; };
  view.setGitContext = () => { gitUpdates++; };
- const deletion = view.onFileDeleted(deleted, '/one');
+ const deletion = view.onPathDeleted(deleted, '/one');
  assert.equal(harness.invalidated, '/one');
  assert.equal(harness.forgotten, deleted); assert.equal(harness.closedFile, deleted);
  assert.equal(view.diffRequestId, 1); assert.equal(refreshes, 1);
@@ -247,13 +248,39 @@ test('trash completion cleans active/saved tabs and recent files; delayed refres
  assert.equal(gitUpdates, 0);
 });
 
+test('trashing a folder closes tabs, history and folder tabs for everything inside it', async () => {
+ const { view, codePane, editorTabs } = setupView('/one', ['/one', '/one/nested', '/two']);
+ view.recentFiles = ['/one/gone/a.ts', '/one/gone-sibling.ts', '/one/keep.ts'];
+ view.previewFiles = new Set(['/one/gone/readme.md', '/one/keep.md']);
+ const location = (filePath) => ({ filePath, pos: 1, scrollTop: 0 });
+ const session = { tabs: { tabs: [{ filePath: '/one/gone/a.ts', kind: 'code' }, { filePath: '/one/keep.ts', kind: 'code' }], active: { filePath: '/one/gone/a.ts', kind: 'code' } },
+  editor: { currentPath: '/one/gone/a.ts', currentLocation: location('/one/gone/a.ts'), fileLocations: [location('/one/gone/a.ts'), location('/one/keep.ts')],
+   history: [location('/one/gone/b.ts')], forwardHistory: [] } };
+ view.folderSessions.set('/two', session);
+ const forgotten = [], closed = [];
+ codePane.forgetFile = (target) => forgotten.push(target);
+ editorTabs.closeFile = (target) => closed.push(target);
+ editorTabs.state.active = { filePath: '/one/gone/a.ts', kind: 'code' };
+ view.setGitContext = () => {};
+ await view.onPathDeleted('/one/gone', '/one');
+ assert.deepEqual(view.recentFiles, ['/one/gone-sibling.ts', '/one/keep.ts']);
+ assert.deepEqual([...view.previewFiles], ['/one/keep.md']);
+ assert.deepEqual(session.tabs, { tabs: [{ filePath: '/one/keep.ts', kind: 'code' }], active: { filePath: '/one/keep.ts', kind: 'code' } });
+ assert.deepEqual(session.editor, { currentPath: null, currentLocation: null, fileLocations: [location('/one/keep.ts')], history: [], forwardHistory: [] });
+ assert.deepEqual(forgotten, ['/one/gone']); assert.deepEqual(closed, ['/one/gone']);
+ assert.equal(view.diffRequestId, 1);
+ assert.deepEqual(view.folderPaths, ['/one', '/one/nested', '/two']);
+ await view.onPathDeleted('/one/nested', '/one');
+ assert.deepEqual(view.folderPaths, ['/one', '/two']);
+});
+
 test('trash completion refreshes Git from the surviving selection without cancelling an unrelated diff', async () => {
  const { view, editorTabs, codePane } = setupView('/one');
  view.recentFiles = []; codePane.forgetFile = () => {}; editorTabs.closeFile = () => {};
  editorTabs.state.active = { filePath: '/one/keep.ts', kind: 'diff' };
  let selection;
  view.setGitContext = value => { selection = value; };
- await view.onFileDeleted('/one/delete.ts', '/one');
+ await view.onPathDeleted('/one/delete.ts', '/one');
  assert.deepEqual(selection, { path: '/one/keep.ts', isDirectory: false });
  assert.equal(view.diffRequestId, 0);
 });

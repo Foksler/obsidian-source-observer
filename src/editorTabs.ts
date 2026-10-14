@@ -1,5 +1,6 @@
 import * as path from 'path';
 import { setIcon } from 'obsidian';
+import { containsFile } from './searchRoots';
 
 export interface SourceTab { filePath: string; kind: 'code' | 'diff' }
 export interface EditorTabsState { tabs: SourceTab[]; active: SourceTab | null }
@@ -56,12 +57,12 @@ export class EditorTabs {
 		this.render();
 	}
 	closeActive() { const tab = this.tabs.find((entry) => this.key(entry) === this.active); if (tab) this.close(tab); }
-	/** Remove code and diff together, without selecting another tab for the deleted file. */
-	closeFile(filePath: string) {
+	/** Remove code and diff tabs of a deleted file or folder, without selecting another deleted tab. */
+	closeFile(deletedPath: string) {
 		const active = this.getActive();
 		const index = this.tabs.findIndex((tab) => this.key(tab) === this.active);
-		this.tabs = this.tabs.filter((tab) => tab.filePath !== filePath);
-		if (active?.filePath === filePath) {
+		this.tabs = this.tabs.filter((tab) => !containsFile(deletedPath, tab.filePath));
+		if (active && containsFile(deletedPath, active.filePath)) {
 			const next = this.tabs[Math.min(index, this.tabs.length - 1)];
 			this.active = next ? this.key(next) : '';
 			if (next) this.onSelect(next); else this.onEmpty();

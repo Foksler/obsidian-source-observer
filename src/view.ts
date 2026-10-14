@@ -4,6 +4,8 @@ import * as path from 'path';
 import type SourceObserverPlugin from './main';
 import { FileTree } from './fileTree';
 import { showFileContextMenu } from './fileContextMenu';
+import { confirmAction } from './confirmModal';
+import { containsFile } from './searchRoots';
 import { CodePane, type CodePaneSession } from './codePane';
 import { SearchPanel, type SearchPanelState } from './searchPanel';
 import { EditorTabs, type SourceTab, type EditorTabsState } from './editorTabs';
@@ -195,14 +197,16 @@ export class SourceObserverView extends ItemView {
 			++this.diffRequestId; this.codePane.suspend(); this.markdownPreview.clear(); this.pathLabel.setText('');
 			this.updatePreviewToggle();
 			this.setGitContext(this.fileTree.getSelectedPath() ?? { path: this.repoPath, isDirectory: true });
-		}, (tab, event, element) => showFileContextMenu({ path: tab.filePath, isDirectory: false }, event, element, this.repoPath,
-			(filePath, rootPath) => this.onFileDeleted(filePath, rootPath), (menu) => {
+		}, (tab, event, element) => showFileContextMenu({ path: tab.filePath, isDirectory: false }, event, element, this.repoPath, {
+			onDeleted: (filePath, rootPath) => this.onPathDeleted(filePath, rootPath),
+			addLeadingItems: (menu) => {
 				for (const [title, icon, scope] of [['Close others', 'x', 'others'], ['Close tabs to the left', 'arrow-left-to-line', 'left'],
 					['Close tabs to the right', 'arrow-right-to-line', 'right']] as const) {
 					menu.addItem((item) => item.setTitle(title).setIcon(icon).setDisabled(!this.editorTabs.canCloseRelative(tab, scope))
 						.onClick(() => this.editorTabs.closeRelative(tab, scope)));
 				}
-			}));
+			},
+		}));
 		const pathBar = main.createDiv({ cls: 'so-path-bar' });
 		this.pathLabel = pathBar.createDiv({ cls: 'so-path-label' });
 		this.previewToggle = pathBar.createEl('button', { cls: 'so-search-icon-btn so-preview-toggle' });
@@ -231,8 +235,11 @@ export class SourceObserverView extends ItemView {
 			this.plugin.settings.showHidden,
 			(filePath) => { void this.openTab({ filePath, kind: 'code' }); },
 			(selection) => this.setGitContext(selection),
-			(selection, event, row, root) => showFileContextMenu(selection, event, row, root,
-				(filePath, rootPath) => this.onFileDeleted(filePath, rootPath)),
+			(selection, event, row, root) => showFileContextMenu(selection, event, row, root, {
+				onDeleted: (deletedPath, rootPath) => this.onPathDeleted(deletedPath, rootPath),
+				confirmFolderDelete: (folderPath) => confirmAction(this.app, 'Delete folder',
+					`Are you sure you want to delete "${path.basename(folderPath)}" and everything in it? It will be moved to the system trash.`, 'Delete'),
+			}),
 		);
 
 		this.fileTree.setIncludeWorktrees(this.plugin.settings.includeWorktrees);
@@ -630,25 +637,31 @@ export class SourceObserverView extends ItemView {
 		});
 	}
 
-	private async onFileDeleted(filePath: string, rootPath: string): Promise<void> {
+	/** Forgets a trashed file, or every file inside a trashed folder, across tabs, history and folder sessions. */
+	private async onPathDeleted(deletedPath: string, rootPath: string): Promise<void> {
+		const removed = (filePath: string) => containsFile(deletedPath, filePath);
 		invalidateFileIndex(rootPath);
-		this.recentFiles = this.recentFiles.filter((file) => file !== filePath);
-		this.previewFiles.delete(filePath);
+		this.recentFiles = this.recentFiles.filter((file) => !removed(file));
+		for (const file of [...this.previewFiles]) if (removed(file)) this.previewFiles.delete(file);
 		for (const session of this.folderSessions.values()) {
-			session.tabs.tabs = session.tabs.tabs.filter((tab) => tab.filePath !== filePath);
-			if (session.tabs.active?.filePath === filePath) session.tabs.active = session.tabs.tabs[0] ?? null;
-			if (session.editor.currentPath === filePath) {
+			session.tabs.tabs = session.tabs.tabs.filter((tab) => !removed(tab.filePath));
+			if (session.tabs.active && removed(session.tabs.active.filePath)) session.tabs.active = session.tabs.tabs[0] ?? null;
+			if (session.editor.currentPath && removed(session.editor.currentPath)) {
 				session.editor.currentPath = null;
 				session.editor.currentLocation = null;
 			}
-			session.editor.fileLocations = session.editor.fileLocations.filter((entry) => entry.filePath !== filePath);
-			session.editor.history = session.editor.history.filter((entry) => entry.filePath !== filePath);
-			session.editor.forwardHistory = session.editor.forwardHistory.filter((entry) => entry.filePath !== filePath);
+			session.editor.fileLocations = session.editor.fileLocations.filter((entry) => !removed(entry.filePath));
+			session.editor.history = session.editor.history.filter((entry) => !removed(entry.filePath));
+			session.editor.forwardHistory = session.editor.forwardHistory.filter((entry) => !removed(entry.filePath));
 		}
 		if (this.closed) return;
-		this.codePane.forgetFile(filePath);
-		if (this.editorTabs.getActive()?.filePath === filePath) ++this.diffRequestId;
-		this.editorTabs.closeFile(filePath);
+		this.codePane.forgetFile(deletedPath);
+		const activeTab = this.editorTabs.getActive();
+		if (activeTab && removed(activeTab.filePath)) ++this.diffRequestId;
+		this.editorTabs.closeFile(deletedPath);
+		// Folder tabs opened from inside a trashed folder no longer exist.
+		for (const folder of this.folderPaths.filter((dir) => dir !== this.repoPath && removed(dir))) await this.closeFolder(folder);
+		if (this.closed) return;
 		const activeRoot = this.repoPath;
 		await this.fileTree.refresh();
 		if (this.closed || this.repoPath !== activeRoot) return;
