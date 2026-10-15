@@ -11,6 +11,7 @@ globalThis.window = { require(name) {
  assert.equal(name, 'electron');
  return { clipboard: { writeText: value => calls.push(['copy', value]) }, shell: {
   showItemInFolder: value => calls.push(['reveal', value]),
+  async openExternal(value) { calls.push(['external', value]); },
   async trashItem(value) { calls.push(['trash', value]); if (globalThis.__fileMenu.trashError) throw globalThis.__fileMenu.trashError;
    await rename(value, path.join(trash, path.basename(value))); }
  } };
@@ -19,7 +20,7 @@ const bundle = await build({ entryPoints: ['src/fileContextMenu.ts'], bundle: tr
  plugins: [{ name: 'native-actions', setup(api) {
   api.onResolve({ filter: /^(obsidian|child_process)$/ }, args => ({ path: args.path, namespace: 'shim' }));
   api.onLoad({ filter: /.*/, namespace: 'shim' }, args => ({ loader: 'js', contents: args.path === 'child_process'
-   ? `export function execFile(command, args, done) { globalThis.__fileMenu.calls.push(['exec', command, args]); done(globalThis.__fileMenu.execError ?? null, '', ''); }`
+   ? `export function execFile(command, args, done) { globalThis.__fileMenu.calls.push(['exec', command, args]); done(globalThis.__fileMenu.execError ?? null, { stdout: command === '/usr/bin/osascript' ? globalThis.__fileMenu.browser : '', stderr: '' }); }`
    : `export const Platform = { get isMacOS() { return globalThis.__fileMenu.mac; } };
       export class Notice { constructor(text) { globalThis.__fileMenu.notices.push(text); } }
       export class Menu {
@@ -40,7 +41,7 @@ const file = path.join(directory, 'a.ts');
 await mkdir(directory);
 await writeFile(file, 'export {};');
 test.after(() => rm(root, { recursive: true, force: true }));
-test.beforeEach(() => { calls.length = notices.length = menus.length = 0; globalThis.__fileMenu.mac = true; globalThis.__fileMenu.execError = null; globalThis.__fileMenu.trashError = null; });
+test.beforeEach(() => { calls.length = notices.length = menus.length = 0; globalThis.__fileMenu.mac = true; globalThis.__fileMenu.execError = null; globalThis.__fileMenu.trashError = null; globalThis.__fileMenu.browser = '/Applications/Google Chrome.app\n'; });
 
 test('copy and reveal preserve the exact absolute path, including shell metacharacters', async () => {
  await runFileAction('copy', file);
@@ -101,6 +102,38 @@ test('keyboard menu anchors to the row and Terminal is disabled outside macOS', 
  assert.equal(menu.items[3].disabled, true);
  await assert.rejects(runFileAction('terminal', file), /macOS/);
  assert.deepEqual(calls, []);
+});
+
+test('HTML files open in the default browser, not the app bound to .html', async () => {
+ const page = path.join(directory, 'Report $(echo unsafe).HTML');
+ await writeFile(page, '<p>report</p>');
+ showFileContextMenu({ path: page, isDirectory: false }, { clientX: 0 }, {}, root);
+ const item = menus.at(-1).items.find(entry => entry.title === 'Open in browser');
+ await item.click();
+ assert.deepEqual(calls.map(call => call.slice(0, 2)), [['exec', '/usr/bin/osascript'], ['exec', '/usr/bin/open']]);
+ assert.deepEqual(calls[1][2], ['-a', '/Applications/Google Chrome.app', page]);
+ assert.deepEqual(notices, []);
+ for (const selection of [{ path: file, isDirectory: false }, { path: path.join(root, 'site.html'), isDirectory: true }]) {
+  showFileContextMenu(selection, { clientX: 0 }, {}, root);
+  assert.equal(menus.at(-1).items.some(entry => entry.title === 'Open in browser'), false);
+ }
+});
+
+test('without a default browser, or outside macOS, HTML opens as a file URL; missing files open nothing', async () => {
+ const page = path.join(root, 'page.htm');
+ await writeFile(page, '<p>page</p>');
+ globalThis.__fileMenu.browser = '';
+ await runFileAction('browser', page);
+ globalThis.__fileMenu.mac = false;
+ await runFileAction('browser', page);
+ const url = new URL(`file://${page}`).href;
+ assert.deepEqual(calls, [['exec', '/usr/bin/osascript', calls[0][2]], ['external', url], ['external', url]]);
+ calls.length = 0;
+ await assert.rejects(runFileAction('browser', path.join(root, 'gone.html')));
+ assert.deepEqual(calls, []);
+ showFileContextMenu({ path: path.join(root, 'gone.html'), isDirectory: false }, { clientX: 0 }, {}, root);
+ await menus.at(-1).items.find(entry => entry.title === 'Open in browser').click();
+ assert.deepEqual(notices, ['Could not open this file in the browser.']);
 });
 
 test('relative copying uses the menu project root, including folders and the root itself', async () => {

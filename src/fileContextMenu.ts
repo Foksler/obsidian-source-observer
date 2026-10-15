@@ -1,14 +1,27 @@
 import { execFile } from 'child_process';
 import { promises as fsp } from 'fs';
 import * as path from 'path';
+import { pathToFileURL } from 'url';
 import { promisify } from 'util';
 import { Menu, Notice, Platform } from 'obsidian';
 
 const execFileAsync = promisify(execFile);
-type FileAction = 'copy' | 'copy-relative' | 'reveal' | 'terminal' | 'delete' | 'delete-folder';
+type FileAction = 'copy' | 'copy-relative' | 'reveal' | 'terminal' | 'browser' | 'delete' | 'delete-folder';
 interface ElectronFileActions {
 	clipboard: { writeText(text: string): void };
-	shell: { showItemInFolder(fullPath: string): void; trashItem(fullPath: string): Promise<void> };
+	shell: { showItemInFolder(fullPath: string): void; trashItem(fullPath: string): Promise<void>; openExternal(url: string): Promise<void> };
+}
+
+const HTML_FILE = /\.html?$/i;
+// The http handler, not the .html one: .html is often bound to an editor.
+const DEFAULT_BROWSER_SCRIPT = "ObjC.import('AppKit'); const app = $.NSWorkspace.sharedWorkspace"
+	+ ".URLForApplicationToOpenURL($.NSURL.URLWithString('https://example.com')); app.isNil() ? '' : app.path.js";
+
+async function defaultBrowser(): Promise<string> {
+	try {
+		const { stdout } = await execFileAsync('/usr/bin/osascript', ['-l', 'JavaScript', '-e', DEFAULT_BROWSER_SCRIPT]);
+		return stdout.trim();
+	} catch { return ''; }
 }
 
 function isInside(root: string, target: string): boolean {
@@ -42,6 +55,14 @@ export async function runFileAction(action: FileAction, filePath: string, rootPa
 		await fsp.access(fullPath);
 		const { shell } = window.require('electron') as ElectronFileActions;
 		shell.showItemInFolder(fullPath);
+		return;
+	}
+	if (action === 'browser') {
+		await fsp.access(fullPath);
+		const browser = Platform.isMacOS ? await defaultBrowser() : '';
+		if (browser) { await execFileAsync('/usr/bin/open', ['-a', browser, fullPath]); return; }
+		const { shell } = window.require('electron') as ElectronFileActions;
+		await shell.openExternal(pathToFileURL(fullPath).href);
 		return;
 	}
 	if (!Platform.isMacOS) throw new Error('Opening a terminal is supported on macOS.');
@@ -84,6 +105,7 @@ export function showFileContextMenu(
 	addAction('Copy relative path', 'copy', 'copy-relative', 'Could not copy the relative path.');
 	addAction(Platform.isMacOS ? 'Reveal in Finder' : 'Reveal in file explorer', 'folder-open', 'reveal', 'Could not reveal this path. It may have moved or been deleted.');
 	addAction('Open in terminal', 'terminal', 'terminal', 'Could not open Terminal for this path.', !Platform.isMacOS);
+	if (!selection.isDirectory && HTML_FILE.test(selection.path)) addAction('Open in browser', 'globe', 'browser', 'Could not open this file in the browser.');
 	// The open folder itself is never offered for deletion.
 	if (isInside(path.resolve(rootPath), path.resolve(selection.path))) {
 		// A link to a folder is trashed as a link: no folder prompt, and its target stays untouched.
