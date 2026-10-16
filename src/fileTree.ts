@@ -174,7 +174,7 @@ export class FileTree {
 	getSelectedPath() { return this.selectedPath ? { ...this.selectedPath } : null; }
 	hasFocus() { return this.container.contains(this.container.ownerDocument.activeElement); }
 
-	/** Reveal the current file without opening it again or changing the editor. */
+	/** Reveal a file or folder without opening it or changing the editor; a folder stays collapsed. */
 	async reveal(filePath: string): Promise<boolean> {
 		this.refreshSeq++;
 		let node = this.treeRoot;
@@ -196,9 +196,9 @@ export class FileTree {
 			if (!child) return false;
 			node = child;
 		}
-		if (!current() || node.isDir) return false;
+		if (!current()) return false;
 		for (const ancestor of ancestors) ancestor.expanded = true;
-		this.selectedPath = { path: target, isDirectory: false };
+		this.selectedPath = { path: target, isDirectory: node.isDir };
 		this.renderTree();
 		const row = Array.from(this.container.querySelectorAll<HTMLElement>('.so-tree-row')).find((item) => item.dataset.path === target);
 		row?.focus({ preventScroll: true });

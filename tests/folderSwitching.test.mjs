@@ -37,6 +37,7 @@ await build({
 				'./fileTree': 'export class FileTree {}',
 				'./fileContextMenu': 'export function showFileContextMenu() {}',
 				'./confirmModal': 'export function confirmAction() { return Promise.resolve(false); }',
+				'./nameModal': 'export function promptForName() { return Promise.resolve(false); }',
 				'./codePane': 'export class CodePane {}',
 				'./searchPanel': 'export class SearchPanel {}',
 				'./editorTabs': 'export class EditorTabs {}',
@@ -272,6 +273,32 @@ test('trashing a folder closes tabs, history and folder tabs for everything insi
  assert.deepEqual(view.folderPaths, ['/one', '/one/nested', '/two']);
  await view.onPathDeleted('/one/nested', '/one');
  assert.deepEqual(view.folderPaths, ['/one', '/two']);
+});
+
+test('a created file opens after the tree refresh and is revealed; a folder is only revealed; a folder switch stops both', async () => {
+ const { view, harness, codePane } = setupView('/one', ['/one', '/two']);
+ const steps = [];
+ view.recentFiles = [];
+ view.setGitContext = () => {};
+ view.updatePreviewToggle = () => {};
+ view.treeSearchInput.closest = () => null;
+ view.fileTree.refresh = async () => { steps.push('refresh'); };
+ view.fileTree.reveal = async value => { steps.push(['reveal', value]); return true; };
+ await view.onPathCreated('/one/src/New.php', 'file', '/one');
+ assert.equal(harness.invalidated, '/one');
+ assert.deepEqual(codePane.opened, ['/one/src/New.php']);
+ assert.deepEqual(steps, ['refresh', ['reveal', '/one/src/New.php']]);
+ steps.length = 0;
+ await view.onPathCreated('/one/src/made', 'folder', '/one');
+ assert.deepEqual(codePane.opened, ['/one/src/New.php']);
+ assert.deepEqual(steps, ['refresh', ['reveal', '/one/src/made']]);
+ steps.length = 0;
+ const refresh = deferred();
+ view.fileTree.refresh = () => { steps.push('refresh'); return refresh.promise; };
+ const creation = view.onPathCreated('/one/Late.php', 'file', '/one');
+ view.repoPath = '/two'; refresh.resolve(); await creation;
+ assert.deepEqual(steps, ['refresh']);
+ assert.deepEqual(codePane.opened, ['/one/src/New.php']);
 });
 
 test('trash completion refreshes Git from the surviving selection without cancelling an unrelated diff', async () => {

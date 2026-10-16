@@ -3,8 +3,9 @@ import * as fs from 'fs';
 import * as path from 'path';
 import type SourceObserverPlugin from './main';
 import { FileTree } from './fileTree';
-import { showFileContextMenu } from './fileContextMenu';
+import { showFileContextMenu, type NewEntryKind } from './fileContextMenu';
 import { confirmAction } from './confirmModal';
+import { promptForName } from './nameModal';
 import { containsFile } from './searchRoots';
 import { CodePane, type CodePaneSession } from './codePane';
 import { SearchPanel, type SearchPanelState } from './searchPanel';
@@ -239,6 +240,9 @@ export class SourceObserverView extends ItemView {
 				onDeleted: (deletedPath, rootPath) => this.onPathDeleted(deletedPath, rootPath),
 				confirmFolderDelete: (folderPath) => confirmAction(this.app, 'Delete folder',
 					`Are you sure you want to delete "${path.basename(folderPath)}" and everything in it? It will be moved to the system trash.`, 'Delete'),
+				promptNewName: (kind, parentDir, submit) => promptForName(this.app, kind === 'file' ? 'New file' : 'New folder',
+					`In ${path.join(path.basename(root), path.relative(root, parentDir))}`, 'Create', submit),
+				onCreated: (createdPath, kind, rootPath) => this.onPathCreated(createdPath, kind, rootPath),
 			}),
 		);
 
@@ -501,6 +505,11 @@ export class SourceObserverView extends ItemView {
 	private async locateCurrentFile() {
 		const filePath = this.editorTabs.getActive()?.filePath ?? this.codePane.getCurrentFile();
 		if (!filePath) { new Notice('Open a file first.'); return; }
+		await this.revealInTree(filePath, 'Could not locate this file. Check hidden-file and worktree visibility.');
+	}
+
+	/** Clears the tree filter and reveals `target`, or shows `failure` when the tree hides it. */
+	private async revealInTree(target: string, failure: string) {
 		if (this.treeSearchTimer) window.clearTimeout(this.treeSearchTimer);
 		this.treeSearchTimer = null;
 		this.treeSearchInput.value = '';
@@ -509,9 +518,9 @@ export class SourceObserverView extends ItemView {
 		section?.querySelector('.so-section-toggle')?.setAttribute('aria-expanded', 'true');
 		section?.querySelector('.so-section-chevron')?.setText('▾');
 		const request = this.folderRequestId;
-		if (!await this.fileTree.reveal(filePath) && !this.closed && request === this.folderRequestId) {
+		if (!await this.fileTree.reveal(target) && !this.closed && request === this.folderRequestId) {
 			await this.fileTree.search('');
-			new Notice('Could not locate this file. Check hidden-file and worktree visibility.');
+			new Notice(failure);
 		}
 	}
 
@@ -635,6 +644,18 @@ export class SourceObserverView extends ItemView {
 			const filePath = path.isAbsolute(cf.file) ? cf.file : path.join(root, cf.file);
 			void this.openTab({ filePath, kind: 'diff' });
 		});
+	}
+
+	/** Opens a new file and selects the new entry in the tree. */
+	private async onPathCreated(createdPath: string, kind: NewEntryKind, rootPath: string): Promise<void> {
+		invalidateFileIndex(rootPath);
+		if (this.closed || this.repoPath !== rootPath) return;
+		// Refresh first: revealing alone re-reads the parent and would collapse its open subfolders.
+		await this.fileTree.refresh();
+		if (this.closed || this.repoPath !== rootPath) return;
+		if (kind === 'file') await this.openTab({ filePath: createdPath, kind: 'code' });
+		if (this.closed || this.repoPath !== rootPath) return;
+		await this.revealInTree(createdPath, `${kind === 'file' ? 'File' : 'Folder'} created, but the tree hides it. Check hidden-file, excluded-file and worktree settings.`);
 	}
 
 	/** Forgets a trashed file, or every file inside a trashed folder, across tabs, history and folder sessions. */

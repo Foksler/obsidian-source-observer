@@ -32,7 +32,7 @@ const bundle = await build({ entryPoints: ['src/fileContextMenu.ts'], bundle: tr
        showAtPosition(position) { this.position = position; }
       }` }));
  } }] });
-const { runFileAction, showFileContextMenu } = await import(`data:text/javascript;base64,${Buffer.from(bundle.outputFiles[0].text).toString('base64')}`);
+const { runFileAction, showFileContextMenu, createEntry } = await import(`data:text/javascript;base64,${Buffer.from(bundle.outputFiles[0].text).toString('base64')}`);
 const root = await mkdtemp(path.join(os.tmpdir(), 'so-file-actions-'));
 const trash = path.join(root, '.test-trash');
 await mkdir(trash);
@@ -271,4 +271,80 @@ test('refresh failure reports that trashing succeeded', async () => {
  await menus.at(-1).items.at(-1).click();
  await assert.rejects(lstat(target), { code: 'ENOENT' });
  assert.deepEqual(notices, ['File moved to trash.', 'File moved to trash, but the view could not refresh.']);
+});
+
+function namePrompt(names) {
+ const asked = [], errors = [];
+ return { asked, errors, async promptNewName(kind, parentDir, submit) {
+  asked.push([kind, parentDir]);
+  for (const name of names.splice(0)) {
+   const error = await submit(name);
+   if (error === null) return true;
+   errors.push(error);
+  }
+  return false;
+ } };
+}
+
+test('New file and New folder come first, and only when the caller can ask for a name', () => {
+ showFileContextMenu({ path: file, isDirectory: false }, { clientX: 0 }, {}, root);
+ assert.equal(menus.at(-1).items.some(item => item.title.startsWith('New')), false);
+ showFileContextMenu({ path: file, isDirectory: false }, { clientX: 0 }, {}, root, { promptNewName: namePrompt([]).promptNewName });
+ assert.deepEqual(menus.at(-1).items.slice(0, 3).map(item => item.title), ['New file…', 'New folder…', 'Copy path']);
+ assert.equal(menus.at(-1).separator, true);
+});
+
+test('a folder row creates inside it, a file row next to it, including nested folders', async () => {
+ const created = [];
+ const onCreated = async (createdPath, kind, project) => { created.push([createdPath, kind, project]); };
+ const inFolder = namePrompt(['new file.ts']);
+ showFileContextMenu({ path: directory, isDirectory: true }, { clientX: 0 }, {}, root, { promptNewName: inFolder.promptNewName, onCreated });
+ await menus.at(-1).items[0].click();
+ const nextToFile = namePrompt(['made/deeper/']);
+ showFileContextMenu({ path: file, isDirectory: false }, { clientX: 0 }, {}, root, { promptNewName: nextToFile.promptNewName, onCreated });
+ await menus.at(-1).items[1].click();
+ assert.deepEqual([inFolder.asked, nextToFile.asked], [[['file', directory]], [['folder', directory]]]);
+ const newFile = path.join(directory, 'new file.ts'), newFolder = path.join(directory, 'made', 'deeper');
+ assert.deepEqual(created, [[newFile, 'file', root], [newFolder, 'folder', root]]);
+ assert.equal(await readFile(newFile, 'utf8'), '');
+ assert.equal((await lstat(newFolder)).isDirectory(), true);
+ assert.deepEqual(notices, []);
+});
+
+test('refused names keep the dialog open with the reason; existing paths are never overwritten', async () => {
+ const prompt = namePrompt(['  ', '../escape.ts', '/absolute.ts', 'a.ts', 'a.ts/inner.ts', 'fixed.ts']);
+ let created = 0;
+ showFileContextMenu({ path: file, isDirectory: false }, { clientX: 0 }, {}, root, { promptNewName: prompt.promptNewName, onCreated: async () => { created++; } });
+ await menus.at(-1).items[0].click();
+ assert.deepEqual(prompt.errors, ['Enter a name.', 'A name cannot contain "." or ".." folders.', 'Enter a name relative to this folder.',
+  '"a.ts" already exists.', 'Cannot create folder "a.ts": a file is in the way.']);
+ assert.equal(created, 1);
+ assert.equal(await readFile(file, 'utf8'), 'export {};');
+ await assert.rejects(lstat(path.join(root, 'escape.ts')), { code: 'ENOENT' });
+ assert.equal(await readFile(path.join(directory, 'fixed.ts'), 'utf8'), '');
+ await mkdir(path.join(root, 'existing folder'));
+ await assert.rejects(createEntry('folder', root, 'existing folder', root), /already exists/);
+});
+
+test('a cancelled dialog creates nothing; a refresh failure reports that creation succeeded', async () => {
+ let created = 0;
+ showFileContextMenu({ path: root, isDirectory: true }, { clientX: 0 }, {}, root, { promptNewName: async () => false, onCreated: async () => { created++; } });
+ await menus.at(-1).items[0].click();
+ assert.equal(created, 0);
+ showFileContextMenu({ path: root, isDirectory: true }, { clientX: 0 }, {}, root, { promptNewName: namePrompt(['refresh-error.md']).promptNewName,
+  onCreated: async () => { throw new Error('view failed'); } });
+ await menus.at(-1).items[0].click();
+ assert.equal(await readFile(path.join(root, 'refresh-error.md'), 'utf8'), '');
+ assert.deepEqual(notices, ['File created, but the view could not refresh.']);
+});
+
+test('creation stays inside the project root and follows a link to a folder into its target', async () => {
+ const outside = await mkdtemp(path.join(os.tmpdir(), 'so-outside-'));
+ try {
+  await assert.rejects(createEntry('file', outside, 'external.ts', root), /outside the project root/);
+  await assert.rejects(createEntry('file', root, 'x.ts', directory), /outside the project root/);
+  await symlink(outside, path.join(root, 'outside-link'));
+  assert.equal(await createEntry('file', path.join(root, 'outside-link'), 'via link.ts', root), path.join(root, 'outside-link', 'via link.ts'));
+  assert.equal(await readFile(path.join(outside, 'via link.ts'), 'utf8'), '');
+ } finally { await rm(outside, { recursive: true, force: true }); }
 });

@@ -667,3 +667,6 @@
  .so-find-footer span { flex-basis: 100%; }
  .so-find-location { max-width: 40%; }
 }
+.so-name-modal .so-name-location { margin-top: 0; color: var(--text-muted); font-size: var(--font-ui-small); overflow-wrap: anywhere; }
+.so-name-modal .so-name-input { width: 100%; }
+.so-name-modal .so-name-error { margin-top: 6px; color: var(--text-error); font-size: var(--font-ui-small); }

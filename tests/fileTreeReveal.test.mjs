@@ -271,3 +271,16 @@ test('symlinked folders expand through the link, keep in-root paths and mark bro
   assert.equal(rowFor(path.join(root, 'broken')).classes.has('so-tree-symlink-broken'), false);
  } finally { await fixture.cleanup(); await rm(outside, { recursive: true, force: true }); }
 });
+
+test('Locate selects a folder and keeps it collapsed', async () => {
+ const fixture = await setup();
+ try {
+  const { tree, file, container } = fixture;
+  const folder = path.dirname(file);
+  assert.equal(await tree.reveal(folder), true);
+  const row = container.querySelectorAll('.so-tree-row').find(item => item.dataset.path === folder);
+  assert.equal(row.attrs['aria-selected'], 'true');
+  assert.equal(row.attrs['aria-expanded'], 'false');
+  assert.deepEqual(tree.getSelectedPath(), { path: folder, isDirectory: true });
+ } finally { await fixture.cleanup(); }
+});

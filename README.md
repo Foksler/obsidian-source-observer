@@ -13,7 +13,7 @@ The original author's MIT licence and Git history are preserved.
 ## Features
 
 - **File tree** — open any folder, navigate directories, see file-type icons with language colours. Symlinks open like their targets, so a link to a folder expands in place; they are marked ↗ with the target in the tooltip, and broken links are dimmed. Search and the filename index do not follow them.
-- **File actions** — right-click a tree row or press Shift+F10 to copy its absolute or project-relative path, reveal it in Finder, or open its folder in Terminal on macOS. HTML files also offer **Open in browser**, which uses the default browser even when `.html` is bound to an editor. Files and folders also offer **Delete**, which moves them to the system Trash and closes the code/diff tabs of everything removed; folders ask for confirmation first, and the open folder itself cannot be deleted. Deleting a symlink trashes the link only, never its target.
+- **File actions** — right-click a tree row or press Shift+F10 to create a file or folder, copy its absolute or project-relative path, reveal it in Finder, or open its folder in Terminal on macOS. HTML files also offer **Open in browser**, which uses the default browser even when `.html` is bound to an editor. Files and folders also offer **Delete**, which moves them to the system Trash and closes the code/diff tabs of everything removed; folders ask for confirmation first, and the open folder itself cannot be deleted. Deleting a symlink trashes the link only, never its target. **New file…** and **New folder…** create an empty entry inside the selected folder, or next to the selected file; a name such as `app/Http/Kernel.php` also creates the missing folders. An existing path is never overwritten, and a new file opens right away.
 - **Syntax highlighting** — PHP, Go, JS/TS, Python, Rust, CSS, HTML, JSON, YAML and Markdown; choose Cursor Monokai Pro, VS Code Dark+, One Dark or your Obsidian theme
 - **Language navigation** — local Intelephense for PHP and opt-in gopls for Go: definitions, references, hover documentation and symbols
 - **Quick open** — search filenames and paths with fuzzy matching in a separate keyboard-driven picker
@@ -137,6 +137,8 @@ also receive global shortcuts in Obsidian's **Hotkeys** settings.
 
 This desktop plugin reads the folder you select outside the vault. Source files
 are read-only: navigation, search and diffs never save changes to the codebase.
+Only the file context menu changes the folder: it creates empty files and folders
+and moves entries to the system Trash.
 
 - **Language navigation:** Cmd-click (Ctrl-click on Windows/Linux) or F12 opens a
   definition. Clicking a declaration shows usages. Shift+F12 opens references;
@@ -178,8 +180,8 @@ are read-only: navigation, search and diffs never save changes to the codebase.
   folders such as app, config, database, routes and tests. A right-pointing chevron
   marks a collapsed folder; a downward chevron and open icon mark an expanded one.
 - **Context menu:** right-click a file or folder (including the project root and
-  filtered files) for **Copy path**, **Copy relative path**, **Reveal in Finder**,
-  and **Open in terminal**. Relative paths start at the active project folder
+  filtered files) for **New file…**, **New folder…**, **Copy path**,
+  **Copy relative path**, **Reveal in Finder**, and **Open in terminal**. Relative paths start at the active project folder
   (`.` for the root itself); **Copy path** uses the absolute path.
   On macOS, Terminal opens the selected directory or
   the file's parent; other desktop platforms support copying and revealing only.
