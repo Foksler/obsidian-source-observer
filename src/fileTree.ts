@@ -1,6 +1,6 @@
 import { promises as fsp } from 'fs';
 import * as path from 'path';
-import { setIcon } from 'obsidian';
+import { setIcon, setTooltip } from 'obsidian';
 import { setFolderIcon } from './folderIcons';
 import { getRegisteredWorktrees } from './searchEngine';
 import { FILE_SEARCH_RESULTS_CAP, searchFilePathIndex } from './filePathIndex.ts';
@@ -85,11 +85,10 @@ export class FileTree {
 		showHidden: boolean,
 		onSelect: (filePath: string) => void,
 		private onPathSelect?: (selection: { path: string; isDirectory: boolean }) => void,
-		private onContextMenu?: (selection: { path: string; isDirectory: boolean; isSymlink?: boolean }, event: MouseEvent | KeyboardEvent, row: HTMLElement, rootPath: string) => void,
+		private onContextMenu?: (selection: { path: string; isDirectory: boolean; isSymlink?: boolean; linkTarget?: string }, event: MouseEvent | KeyboardEvent, row: HTMLElement, rootPath: string) => void,
 	) {
 		this.container = container;
 		container.setAttribute('role', 'tree');
-		container.setAttribute('aria-label', 'Source files');
 		this.showHidden = showHidden;
 		this.onSelect = onSelect;
 	}
@@ -206,7 +205,7 @@ export class FileTree {
 		return !!row;
 	}
 
-	private prepareRow(row: HTMLElement, filePath: string, isDirectory: boolean, isSymlink = false) {
+	private prepareRow(row: HTMLElement, filePath: string, isDirectory: boolean, linkTarget?: string) {
 		row.dataset.path = filePath; row.dataset.directory = String(isDirectory);
 		row.setAttribute('role', 'treeitem');
 		row.setAttribute('aria-selected', String(this.selectedPath?.path === filePath));
@@ -229,7 +228,7 @@ export class FileTree {
 			event.stopPropagation();
 			select();
 			row.focus();
-			this.onContextMenu(isSymlink ? { path: filePath, isDirectory, isSymlink } : { path: filePath, isDirectory }, event, row, this.rootPath);
+			this.onContextMenu(linkTarget ? { path: filePath, isDirectory, isSymlink: true, linkTarget } : { path: filePath, isDirectory }, event, row, this.rootPath);
 		};
 		row.addEventListener('contextmenu', showContextMenu);
 		row.addEventListener('keydown', (event) => {
@@ -351,9 +350,11 @@ export class FileTree {
 			if (generation !== this.loadSeq || this.disposed) return null;
 			if (stat.isSymbolicLink()) {
 				// A link opens like its target. Children load per click, so a link cycle never recurses on its own.
-				const [target, targetStat] = await Promise.all([fsp.readlink(fullPath), fsp.stat(fullPath).catch(() => null)]);
+				const [target, targetStat, real] = await Promise.all([
+					fsp.readlink(fullPath), fsp.stat(fullPath).catch(() => null), fsp.realpath(fullPath).catch(() => null)]);
 				if (generation !== this.loadSeq || this.disposed) return null;
-				link = { target, broken: !targetStat };
+				// A broken link has no real path; show where it points instead.
+				link = { target, resolved: real ?? path.resolve(path.dirname(fullPath), target), broken: !targetStat };
 				isDir = !!targetStat?.isDirectory();
 			} else isDir = stat.isDirectory();
 		} catch {
@@ -389,7 +390,7 @@ export class FileTree {
 
 	private renderNode(node: TreeNode, parent: HTMLElement, depth: number) {
 		const row = parent.createDiv({ cls: 'so-tree-row' });
-		this.prepareRow(row, node.fullPath, node.isDir, !!node.link);
+		this.prepareRow(row, node.fullPath, node.isDir, node.link?.resolved);
 		row.setCssProps({ '--so-indent': `${depth * 14 + 6}px` });
 
 		const chevron = row.createSpan({ cls: 'so-tree-chevron', attr: { 'aria-hidden': 'true' } });
@@ -449,8 +450,11 @@ export class FileTree {
 		if (node.link) {
 			row.addClass('so-tree-symlink');
 			row.toggleClass('so-tree-symlink-broken', node.link.broken);
-			row.title = `${node.link.broken ? 'Broken link' : 'Link'} → ${node.link.target}`;
-			setIcon(row.createSpan({ cls: 'so-tree-link-badge', attr: { 'aria-hidden': 'true' } }), 'arrow-up-right');
+			const badge = row.createSpan({ cls: 'so-tree-link-badge' });
+			setIcon(badge, 'arrow-up-right');
+			// Obsidian's default hover delay is long for a badge whose only purpose is this path.
+			setTooltip(badge, `${node.link.broken ? 'Broken link' : 'Link'} → ${node.link.resolved}`,
+				{ placement: 'right', delay: 100, classes: ['so-link-tooltip'] });
 		}
 	}
 }

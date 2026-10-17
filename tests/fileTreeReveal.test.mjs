@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { mkdtemp, mkdir, rename, writeFile, rm, symlink } from 'node:fs/promises';
+import { mkdtemp, mkdir, rename, writeFile, rm, symlink, realpath } from 'node:fs/promises';
 import path from 'node:path';
 import os from 'node:os';
 import { build } from 'esbuild';
@@ -8,7 +8,7 @@ import { build } from 'esbuild';
 const bundle = await build({ stdin: { contents: "export { FileTree } from './src/fileTree.ts'; export { invalidateFileIndex } from './src/filePathIndex.ts';", resolveDir: process.cwd() }, bundle: true, platform: 'node', format: 'esm', write: false,
  plugins: [{ name: 'tree-test', setup(api) {
   api.onResolve({ filter: /^obsidian$/ }, () => ({ path: 'obsidian', namespace: 'shim' }));
-  api.onLoad({ filter: /.*/, namespace: 'shim' }, () => ({ contents: 'export function setIcon(element, name) { element.icon = name; }', loader: 'js' }));
+  api.onLoad({ filter: /.*/, namespace: 'shim' }, () => ({ contents: 'export function setIcon(element, name) { element.icon = name; } export function setTooltip(element, text) { element.tooltip = text; }', loader: 'js' }));
   api.onResolve({ filter: /^\.\/searchEngine$/ }, () => ({ path: 'search', namespace: 'search' }));
   api.onLoad({ filter: /.*/, namespace: 'search' }, () => ({ contents: 'export async function getRegisteredWorktrees() { return []; }', loader: 'js' }));
  } }] });
@@ -250,7 +250,10 @@ test('symlinked folders expand through the link, keep in-root paths and mark bro
   const skills = rowFor(path.join(root, 'skills')), memory = rowFor(path.join(root, 'CLAUDE.md')), broken = rowFor(path.join(root, 'broken'));
   assert.equal(skills.dataset.directory, 'true');
   assert.ok(skills.classes.has('so-tree-symlink'));
-  assert.equal(skills.title, `Link → ${path.join(outside, 'skills')}`);
+  const original = await realpath(path.join(outside, 'skills'));
+  const badge = row => row.children.find(child => child.classes.has('so-tree-link-badge'));
+  assert.equal(badge(skills).tooltip, `Link → ${original}`);
+  assert.equal(badge(broken).tooltip, `Broken link → ${path.join(root, 'missing')}`);
   assert.equal(memory.dataset.directory, 'false');
   assert.ok(memory.classes.has('so-tree-symlink'));
   assert.equal(broken.dataset.directory, 'false');
@@ -263,7 +266,7 @@ test('symlinked folders expand through the link, keep in-root paths and mark bro
   const menus = [];
   tree.onContextMenu = selection => menus.push(selection);
   rowFor(path.join(root, 'skills')).listeners.get('contextmenu')({ preventDefault() {}, stopPropagation() {} });
-  assert.deepEqual(menus, [{ path: path.join(root, 'skills'), isDirectory: true, isSymlink: true }]);
+  assert.deepEqual(menus, [{ path: path.join(root, 'skills'), isDirectory: true, isSymlink: true, linkTarget: original }]);
   await rm(path.join(root, 'broken'));
   await symlink(path.join(outside, 'skills'), path.join(root, 'broken'));
   await tree.refresh();

@@ -4,8 +4,11 @@ export interface TreeNode {
 	isDir: boolean;
 	children?: TreeNode[];
 	expanded?: boolean;
-	/** Set for symlinks: the node takes its target's kind, while `fullPath` stays the path inside the root. */
-	link?: { target: string; broken: boolean };
+	/**
+	 * Set for symlinks: the node takes its target's kind, while `fullPath` stays the path inside the root.
+	 * `target` is the link text as stored; `resolved` is the absolute original location.
+	 */
+	link?: { target: string; resolved: string; broken: boolean };
 }
 
 function sameKind(a: TreeNode, b: TreeNode): boolean {

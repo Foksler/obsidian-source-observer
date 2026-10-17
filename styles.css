@@ -307,6 +307,8 @@
 }
 .so-tree-link-badge svg { width: calc(var(--so-sidebar-font-size, 12px) - 2px); height: calc(var(--so-sidebar-font-size, 12px) - 2px); }
 .so-tree-symlink-broken > .so-tree-label { color: var(--text-faint); }
+/* Keep the target path on one line instead of breaking it mid-name. */
+.tooltip.so-link-tooltip { max-width: none; white-space: nowrap; }
 
 /* ── Changes list ────────────────────────────────────────────── */
 .so-changes {

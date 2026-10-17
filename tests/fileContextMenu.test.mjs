@@ -228,6 +228,22 @@ test('Delete trashes symlinks themselves, including broken links and links to di
  assert.equal((await lstat(directory)).isDirectory(), true);
 });
 
+test('a link reveals itself and, separately, its original; broken originals report and launch nothing', async () => {
+ const link = path.join(root, 'original-link');
+ await symlink(directory, link);
+ showFileContextMenu({ path: link, isDirectory: true, isSymlink: true, linkTarget: directory }, { clientX: 0 }, {}, root);
+ const menu = menus.at(-1);
+ assert.deepEqual(menu.items.map(item => item.title), ['Copy path', 'Copy relative path', 'Reveal in Finder', 'Reveal original in Finder', 'Open in terminal', 'Delete']);
+ await menu.items[2].click();
+ await menu.items[3].click();
+ assert.deepEqual(calls, [['reveal', link], ['reveal', directory]]);
+ calls.length = 0;
+ showFileContextMenu({ path: link, isDirectory: false, isSymlink: true, linkTarget: path.join(root, 'missing') }, { clientX: 0 }, {}, root);
+ await menus.at(-1).items[3].click();
+ assert.deepEqual(calls, []);
+ assert.deepEqual(notices, ['Could not reveal the original. The link may be broken.']);
+});
+
 test('Delete on a link to a folder trashes only the link, without the folder prompt', async () => {
  const link = path.join(root, 'linked-folder');
  await symlink(directory, link);

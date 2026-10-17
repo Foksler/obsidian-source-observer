@@ -33,6 +33,8 @@ export const VIEW_TYPE = 'source-observer';
 const SEARCH_DEBOUNCE_MS = 0;
 /** Backup refresh of the file tree and Git changes when filesystem events are missed. */
 const PROJECT_POLL_MS = 5000;
+/** Keeps section title ids unique across open views. */
+let sectionTitleCount = 0;
 
 interface ElectronRemote {
 	dialog: {
@@ -145,10 +147,11 @@ export class SourceObserverView extends ItemView {
 			(dir) => { void this.closeFolder(dir).catch(() => new Notice('Could not close this folder.')); });
 
 		const sections = sidebar.createDiv({ cls: 'so-sidebar-sections' });
-		const { section: filesSection, body: treeBody, searchInput: treeSearch } = this.buildSection(sections, 'Files');
+		const { section: filesSection, body: treeBody, searchInput: treeSearch, titleId: filesTitleId } = this.buildSection(sections, 'Files');
 		filesSection.addClass('so-files-section');
 		this.treeSearchInput = treeSearch;
-		const treeContainer = treeBody.createDiv({ cls: 'so-tree' });
+		// Named by the section title: an aria-label would show Obsidian's tooltip over the whole tree.
+		const treeContainer = treeBody.createDiv({ cls: 'so-tree', attr: { 'aria-labelledby': filesTitleId } });
 
 		const gitSplitter = addVerticalSplitter(this, sections, { label: 'Resize Git changes', sizeProperty: '--so-git-size',
 			fromBottom: true, initial: 0, minLast: 80, minRatio: 0, maxRatio: 100 });
@@ -530,7 +533,8 @@ export class SourceObserverView extends ItemView {
 
 		const toggle = header.createEl('button', { cls: 'so-section-toggle', attr: { 'aria-label': `Toggle ${title.toLowerCase()}`, 'aria-expanded': 'true' } });
 		const chevron = toggle.createSpan({ cls: 'so-section-chevron', text: '▾' });
-		toggle.createSpan({ cls: 'so-section-title', text: title });
+		const titleId = `so-section-title-${++sectionTitleCount}`;
+		toggle.createSpan({ cls: 'so-section-title', text: title, attr: { id: titleId } });
 
 		const headerRight = header.createDiv({ cls: 'so-section-header-right' });
 		const searchBtn = headerRight.createEl('button', { cls: 'so-search-icon-btn', attr: { 'aria-label': `Filter ${title.toLowerCase()}` } });
@@ -563,7 +567,7 @@ export class SourceObserverView extends ItemView {
 			}
 		});
 
-		return { section, body, searchInput, headerRight };
+		return { section, body, searchInput, headerRight, titleId };
 	}
 
 	private setGitContext(context: { path: string; isDirectory: boolean }) {

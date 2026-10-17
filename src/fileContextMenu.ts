@@ -121,7 +121,7 @@ export interface FileMenuOptions {
 
 /** Native Obsidian menu, shared by tree rows, filtered results and source tabs. */
 export function showFileContextMenu(
-	selection: { path: string; isDirectory: boolean; isSymlink?: boolean },
+	selection: { path: string; isDirectory: boolean; isSymlink?: boolean; linkTarget?: string },
 	event: MouseEvent | KeyboardEvent,
 	row: HTMLElement,
 	rootPath: string,
@@ -150,17 +150,20 @@ export function showFileContextMenu(
 		}
 		menu.addSeparator();
 	}
-	const addAction = (title: string, icon: string, action: FileAction, failure: string, disabled = false) => {
+	const addAction = (title: string, icon: string, action: FileAction, failure: string, disabled = false, actionPath?: string) => {
 		menu.addItem((item) => item.setTitle(title).setIcon(icon).setDisabled(disabled).onClick(async () => {
 			try {
-				await runFileAction(action, selection.path, rootPath);
+				await runFileAction(action, actionPath ?? selection.path, rootPath);
 				if (action === 'copy' || action === 'copy-relative') new Notice('Path copied.');
 			} catch { new Notice(failure); }
 		}));
 	};
 	addAction('Copy path', 'copy', 'copy', 'Could not copy the path.');
 	addAction('Copy relative path', 'copy', 'copy-relative', 'Could not copy the relative path.');
-	addAction(Platform.isMacOS ? 'Reveal in Finder' : 'Reveal in file explorer', 'folder-open', 'reveal', 'Could not reveal this path. It may have moved or been deleted.');
+	const explorer = Platform.isMacOS ? 'Finder' : 'file explorer';
+	addAction(`Reveal in ${explorer}`, 'folder-open', 'reveal', 'Could not reveal this path. It may have moved or been deleted.');
+	// Reveal in Finder shows the link itself; this shows where it points.
+	if (selection.linkTarget) addAction(`Reveal original in ${explorer}`, 'arrow-up-right', 'reveal', 'Could not reveal the original. The link may be broken.', false, selection.linkTarget);
 	addAction('Open in terminal', 'terminal', 'terminal', 'Could not open Terminal for this path.', !Platform.isMacOS);
 	if (!selection.isDirectory && HTML_FILE.test(selection.path)) addAction('Open in browser', 'globe', 'browser', 'Could not open this file in the browser.');
 	// The open folder itself is never offered for deletion.
