@@ -1,9 +1,9 @@
-import { promises as fsp } from 'fs';
 import * as path from 'path';
 import { Compartment, EditorState, Prec } from '@codemirror/state';
 import { EditorView, keymap, lineNumbers, highlightActiveLine } from '@codemirror/view';
 import { bracketMatching } from '@codemirror/language';
-import { openSearchPanel, search, searchKeymap } from '@codemirror/search';
+import { defaultKeymap, history, historyKeymap, indentWithTab } from '@codemirror/commands';
+import { getSearchQuery, openSearchPanel, search, searchKeymap, searchPanelOpen, setSearchQuery } from '@codemirror/search';
 import type { SyntaxTheme } from './settings';
 import type { LspNavigation } from './lspNavigation';
 import { go } from '@codemirror/lang-go';
@@ -20,6 +20,18 @@ import { isPhpFile } from './phpFiles';
 import { yamlWithKeyHighlighting } from './yamlSyntax';
 import { normalizeShortcuts, type SearchShortcuts } from './searchShortcuts';
 import { containsFile } from './searchRoots';
+import { lineBreakFor, readSourceText, saveIfUnchanged, writeSourceText, type SaveResult, type SourceText } from './sourceFile';
+
+/** Edits are written to disk after this much typing inactivity. */
+const AUTOSAVE_DELAY_MS = 1000;
+
+export interface SaveHandlers {
+	/** Called after the editor wrote `filePath`. */
+	saved(filePath: string): void;
+	/** Asks whether to overwrite a file that changed on disk, or was removed, since it was loaded. */
+	conflict(filePath: string, missing: boolean): Promise<boolean>;
+	failed(filePath: string, error: unknown): void;
+}
 
 const EXT_LANG: Record<string, () => ReturnType<typeof javascript>> = {
 	go:   () => go(),
@@ -112,9 +124,10 @@ export function cloneCodePaneSession(session: CodePaneSession | null): CodePaneS
 }
 
 /**
- * Read-only CodeMirror 6 editor pane that syntax-highlights files using
- * Obsidian CSS variables. A single EditorView instance is reused across
- * files; language and font size are swapped via Compartments.
+ * CodeMirror 6 editor pane that syntax-highlights files using Obsidian CSS
+ * variables and autosaves edits. A single EditorView instance is reused
+ * across files, each file getting a fresh state with its own undo history;
+ * theme and font size are swapped via Compartments.
  */
 export class CodePane {
 	private container: HTMLElement;
@@ -122,7 +135,6 @@ export class CodePane {
 	private fontSize: number;
 	private fontFamily: string;
 	private fontLigatures: boolean;
-	private language = new Compartment();
 	private font = new Compartment();
 	private theme = new Compartment();
 	private themeName: SyntaxTheme;
@@ -137,6 +149,15 @@ export class CodePane {
 	/** Positions to return to with Mod-[ after jumping to a definition. */
 	private history: { filePath: string; pos: number; scrollTop: number }[] = [];
 	private onShown: (filePath: string) => void;
+	private saveHandlers: SaveHandlers = { saved: () => {}, conflict: () => Promise.resolve(false), failed: () => {} };
+	/** Disk text the shown document was loaded from or last saved as; null while it is read-only. */
+	private savedText: string | null = null;
+	private dirty = false;
+	private saveTimer: number | null = null;
+	/** File whose overwrite question is open; its saves wait for the answer. */
+	private conflictPath: string | null = null;
+	/** Bumped whenever a new document replaces the editor state. */
+	private documentId = 0;
 
 	constructor(container: HTMLElement, fontSize: number, themeName: SyntaxTheme, onShown: (filePath: string) => void, fontFamily = 'JetBrains Mono', fontLigatures = true) {
 		this.container = container;
@@ -155,6 +176,10 @@ export class CodePane {
 		if (this.view && this.currentPath) {
 			this.view.dispatch({ effects: this.lspSlot.reconfigure(this.lsp?.extensionFor(this.currentPath) ?? []) });
 		}
+	}
+
+	setSaveHandlers(handlers: SaveHandlers) {
+		this.saveHandlers = handlers;
 	}
 
 	/** Remembers the cursor so a definition jump can be undone with Mod-[. */
@@ -287,21 +312,22 @@ export class CodePane {
 		this.view.dispatch({ selection: { anchor: from, head: to }, scrollIntoView: true });
 	}
 
-	/** Loads `filePath` into the editor, replacing the current document in place. */
+	/** Loads `filePath` into the editor, saving the current document first. */
 	async open(filePath: string): Promise<EditorView | null> {
 		const requestId = ++this.openRequestId;
 		this.pendingPath = filePath;
-		let content: string;
-		try {
-			content = await fsp.readFile(filePath, 'utf-8');
-		} catch {
-			content = '(cannot read file)';
-		}
+		// Saving before the read lets reopening the shown file see its latest text.
+		this.save();
+		const file = await readSourceText(filePath);
 		if (requestId !== this.openRequestId) return null;
 		this.pendingPath = null;
+		this.save();
 
-		const langExtension = languageForPath(filePath);
-		const lspExtension = this.lsp?.extensionFor(filePath) ?? [];
+		if (this.view && this.currentPath === filePath && (this.dirty || this.view.state.sliceDoc() === file?.content)) {
+			// Reopening the shown file, e.g. for a jump inside it, keeps its undo history.
+			this.onShown(filePath);
+			return this.view;
+		}
 		if (this.view && this.currentPath) {
 			this.fileLocations.set(this.currentPath, {
 				filePath: this.currentPath,
@@ -312,43 +338,127 @@ export class CodePane {
 		const savedLocation = this.fileLocations.get(filePath);
 		this.currentPath = filePath;
 		this.onShown(filePath);
+		this.display(filePath, file);
+		this.restoreSavedFileLocation(savedLocation);
+		return this.view;
+	}
+
+	/** Replaces the editor state with `file`, keeping an open search panel and the focus. */
+	private display(filePath: string, file: SourceText | null) {
+		const content = file?.content ?? '(cannot read file)';
+		this.savedText = file?.editable ? file.content : null;
+		this.dirty = false;
+		this.documentId++;
+		// The language server extension of the old state detaches when its
+		// plugins are destroyed, so each server sees one open file at a time.
+		const state = EditorState.create({
+			doc: content,
+			extensions: [
+				EditorState.readOnly.of(this.savedText === null),
+				EditorState.lineSeparator.of(lineBreakFor(content)),
+				history(),
+				lineNumbers(),
+				highlightActiveLine(),
+				bracketMatching(),
+				obsidianTheme,
+				Prec.highest(this.theme.of(syntaxTheme(this.themeName))),
+				languageForPath(filePath),
+				Prec.highest(this.font.of(fontTheme(this.fontSize, this.fontFamily, this.fontLigatures))),
+				search(),
+				this.shortcuts.of(keymap.of(this.editorBindings())),
+				keymap.of([{ key: 'Mod-s', run: () => { this.save(); return true; } }, ...defaultKeymap, ...historyKeymap, indentWithTab]),
+				this.lspSlot.of(this.lsp?.extensionFor(filePath) ?? []),
+				EditorView.updateListener.of((update) => { if (update.docChanged) this.scheduleSave(); }),
+			],
+		});
 
 		if (!this.view) {
 			// Diff rendering may have replaced this pane after the last editor
 			// was destroyed. Remove that DOM before mounting a fresh editor.
 			this.container.empty();
-			const state = EditorState.create({
-				doc: content,
-				extensions: [
-					EditorState.readOnly.of(true),
-					lineNumbers(),
-					highlightActiveLine(),
-					bracketMatching(),
-					obsidianTheme,
-					Prec.highest(this.theme.of(syntaxTheme(this.themeName))),
-					this.language.of(langExtension),
-					Prec.highest(this.font.of(fontTheme(this.fontSize, this.fontFamily, this.fontLigatures))),
-					search(),
-					this.shortcuts.of(keymap.of(this.editorBindings())),
-					this.lspSlot.of(lspExtension),
-				],
-			});
 			this.view = new EditorView({ state, parent: this.container });
-			this.restoreSavedFileLocation(savedLocation);
-			return this.view;
+			return;
 		}
+		const query = searchPanelOpen(this.view.state) ? getSearchQuery(this.view.state) : null;
+		const focused = this.container.ownerDocument.activeElement as HTMLElement | null;
+		this.view.setState(state);
+		if (!query) return;
+		this.view.dispatch({ effects: setSearchQuery.of(query) });
+		openSearchPanel(this.view);
+		// Reopening the panel focuses its field; give the focus back to the tree or editor.
+		if (focused?.isConnected) focused.focus();
+	}
 
-		// Detach the old file from the language server before swapping the
-		// document, then attach the new one, so each plugin sees one file only.
-		this.view.dispatch({ effects: this.lspSlot.reconfigure([]) });
-		this.view.dispatch({
-			changes: { from: 0, to: this.view.state.doc.length, insert: content },
-			selection: { anchor: Math.min(savedLocation?.pos ?? 0, content.length) },
-			effects: this.language.reconfigure(langExtension),
-		});
-		this.view.dispatch({ effects: this.lspSlot.reconfigure(lspExtension) });
-		this.restoreSavedFileLocation(savedLocation);
-		return this.view;
+	/** Writes unsaved edits of the shown file now, unless the file changed on disk. */
+	save() {
+		if (this.saveTimer !== null) { window.clearTimeout(this.saveTimer); this.saveTimer = null; }
+		const filePath = this.currentPath;
+		if (!this.view || !filePath || !this.dirty || this.savedText === null || this.conflictPath === filePath) return;
+		const text = this.view.state.sliceDoc();
+		let result: SaveResult;
+		try {
+			result = saveIfUnchanged(filePath, text, this.savedText);
+		} catch (error) {
+			this.saveHandlers.failed(filePath, error);
+			return;
+		}
+		if (result !== 'saved') { void this.resolveConflict(filePath, text, result === 'missing'); return; }
+		this.savedText = text;
+		this.dirty = false;
+		this.saveHandlers.saved(filePath);
+	}
+
+	private scheduleSave() {
+		this.dirty = true;
+		if (this.saveTimer !== null) window.clearTimeout(this.saveTimer);
+		this.saveTimer = window.setTimeout(() => { this.saveTimer = null; this.save(); }, AUTOSAVE_DELAY_MS);
+	}
+
+	/** Overwrites the file with the edits, or drops them and shows the disk version, as the user picks. */
+	private async resolveConflict(filePath: string, text: string, missing: boolean) {
+		this.conflictPath = filePath;
+		const documentId = this.documentId;
+		const overwrite = await this.saveHandlers.conflict(filePath, missing);
+		this.conflictPath = null;
+		// The answer may come after the editor moved to another file; then the captured text is saved.
+		const shown = this.view !== null && this.documentId === documentId;
+		if (!overwrite) {
+			if (!shown) return;
+			const file = await readSourceText(filePath);
+			if (this.view && this.documentId === documentId) this.redisplay(filePath, file);
+			return;
+		}
+		const latest = shown ? this.view!.state.sliceDoc() : text;
+		try {
+			writeSourceText(filePath, latest);
+		} catch (error) {
+			this.saveHandlers.failed(filePath, error);
+			return;
+		}
+		if (shown && this.view!.state.sliceDoc() === latest) {
+			this.savedText = latest;
+			this.dirty = false;
+		}
+		this.saveHandlers.saved(filePath);
+	}
+
+	/** Shows the disk text of the shown file when it changed elsewhere and has no unsaved edits here. */
+	async reloadIfChanged() {
+		const filePath = this.currentPath;
+		if (!this.view || !filePath || this.dirty || this.pendingPath) return;
+		const documentId = this.documentId;
+		const file = await readSourceText(filePath);
+		if (!file || !this.view || this.documentId !== documentId || this.dirty || this.pendingPath) return;
+		if (file.content !== this.view.state.sliceDoc()) this.redisplay(filePath, file);
+	}
+
+	/** Shows new text of the shown file at the same cursor and scroll position. */
+	private redisplay(filePath: string, file: SourceText | null) {
+		if (!this.view) return;
+		const pos = this.view.state.selection.main.head;
+		const scrollTop = this.view.scrollDOM.scrollTop;
+		this.display(filePath, file);
+		this.restoreSavedFileLocation({ filePath, pos, scrollTop });
 	}
 
 	private restoreSavedFileLocation(location: CodePaneSessionLocation | undefined) {
@@ -405,6 +515,9 @@ export class CodePane {
 		const removed = (filePath: string) => containsFile(deletedPath, filePath);
 		if (this.pendingPath && removed(this.pendingPath)) { ++this.openRequestId; this.pendingPath = null; }
 		if (this.currentPath && removed(this.currentPath)) {
+			// Unsaved edits of a trashed file are dropped, not written back.
+			if (this.saveTimer !== null) { window.clearTimeout(this.saveTimer); this.saveTimer = null; }
+			this.dirty = false;
 			// A diff can be visible while currentPath still refers to the last code tab.
 			if (this.view) { this.view.destroy(); this.view = null; this.container.empty(); }
 			this.currentPath = null;
@@ -414,8 +527,9 @@ export class CodePane {
 		this.forwardHistory = this.forwardHistory.filter((entry) => !removed(entry.filePath));
 	}
 
-	/** Unmounts CodeMirror while retaining this pane's cursor and navigation state. */
+	/** Saves and unmounts CodeMirror while retaining this pane's cursor and navigation state. */
 	suspend() {
+		this.save();
 		this.openRequestId++;
 		this.pendingPath = null;
 		if (this.view && this.currentPath) {

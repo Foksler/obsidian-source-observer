@@ -18,6 +18,7 @@ The original author's MIT licence and Git history are preserved.
 - **Language navigation** — local Intelephense for PHP and opt-in gopls for Go: definitions, references, hover documentation and symbols
 - **Quick open** — search filenames and paths with fuzzy matching in a separate keyboard-driven picker
 - **Source tabs** — open multiple files and diffs, with cursor and scroll position restoration
+- **Editing** — edit any text file; changes are saved a second after you stop typing, when you switch files and on Cmd+S (Ctrl+S). A file changed on disk elsewhere is never overwritten unasked, and an open file without unsaved edits reloads when it changes on disk
 - **Folder tabs** — open several folders from the toolbar, switch between them above the file tree, and close a folder with its × button. Each folder keeps its own files, cursor positions, navigation history, and search while the view is open; the folder list and active folder also survive a restart.
 - **Git diff** — changed files listed in the sidebar with M/A/D badges and new/modified counts; click any file to see its diff or full content
 - **Collapsible sections** — Files and Changes panels collapse independently
@@ -135,10 +136,21 @@ search in the current file and history navigation in the code viewer.
 **Double shift search** can be disabled independently. Plugin commands can
 also receive global shortcuts in Obsidian's **Hotkeys** settings.
 
-This desktop plugin reads the folder you select outside the vault. Source files
-are read-only: navigation, search and diffs never save changes to the codebase.
-Only the file context menu changes the folder: it creates empty files and folders
+This desktop plugin reads the folder you select outside the vault. Navigation,
+search and diffs never change the codebase. Only two things do: typing in the
+code viewer, and the file context menu, which creates empty files and folders
 and moves entries to the system Trash.
+
+- **Editing:** edits are written to disk one second after the last keystroke,
+  when you switch to another file, tab, folder, diff or preview, when you close
+  the view, and on Cmd+S (Ctrl+S). Undo history belongs to the open file and
+  resets when another file replaces it. Line endings (LF or CRLF) and a UTF-8
+  BOM are kept. Files that are not valid UTF-8, such as images, open read-only.
+- **Changes on disk:** a file opened without unsaved edits reloads when it
+  changes on disk, e.g. when an agent edits it in a terminal. A save first checks
+  that the file still holds the text the editor loaded; if it changed or was
+  removed, a dialog asks whether to overwrite (or recreate) it with your edits or
+  discard them and load the disk version.
 
 - **Language navigation:** Cmd-click (Ctrl-click on Windows/Linux) or F12 opens a
   definition. Clicking a declaration shows usages. Shift+F12 opens references;
@@ -211,7 +223,7 @@ for workspace symbol search. `go.mod`, `go.work` and sum files also use their
 corresponding gopls language identifiers. Worktrees are excluded by default.
 Gopls may download dependencies through the Go module proxy while resolving imports.
 Switching folders, changing navigation settings, restarting navigation or closing
-the view stops the old server processes. Go to implementation and editing/refactoring
+the view stops the old server processes. Go to implementation and refactoring
 are not exposed.
 
 Run the checks with Node.js 24 or newer: `npm test`, `npm run lint` and `npm run build` before installing the three

@@ -81,6 +81,7 @@ export class SourceObserverView extends ItemView {
 	private refreshTimer: number | null = null;
 	private treeSearchTimer: number | null = null;
 	private fileIndexTimer: number | null = null;
+	private openFileTimer: number | null = null;
 	private indexedWorktrees: string[] = [];
 	private diffRequestId = 0;
 	private searchPanel!: SearchPanel;
@@ -231,6 +232,19 @@ export class SourceObserverView extends ItemView {
 			this.plugin.settings.editorFontFamily,
 			this.plugin.settings.editorFontLigatures,
 		);
+		this.codePane.setSaveHandlers({
+			saved: () => this.scheduleChangesRefresh(),
+			conflict: (filePath, missing) => missing
+				? confirmAction(this.app, 'File was removed',
+					`${path.basename(filePath)} no longer exists on disk. Recreate it with your edits, or discard them?`,
+					'Recreate', 'Discard edits')
+				: confirmAction(this.app, 'File changed on disk',
+					`${path.basename(filePath)} changed on disk after it was opened here. Overwrite it with your edits, or discard them and load the disk version?`,
+					'Overwrite', 'Load from disk'),
+			failed: (filePath, error) => {
+				new Notice(`Could not save ${path.basename(filePath)}: ${error instanceof Error ? error.message : String(error)}`);
+			},
+		});
 		this.syncNavigation();
 		this.codePane.setShortcuts(this.plugin.settings.shortcuts);
 
@@ -443,6 +457,7 @@ export class SourceObserverView extends ItemView {
 				window.setInterval(() => {
 					void this.refreshChanges();
 					void this.fileTree.refresh().catch(() => {});
+					void this.codePane.reloadIfChanged();
 				}, PROJECT_POLL_MS),
 			);
 		}
@@ -456,6 +471,8 @@ export class SourceObserverView extends ItemView {
 			const folderRequest = this.folderRequestId;
 			const watcher = fs.watch(root, { recursive: true }, (event, filename) => {
 				if (this.closed || folderRequest !== this.folderRequestId || root !== this.repoPath) return;
+				// Show edits made elsewhere, e.g. by a terminal agent, in the open file.
+				if (filename && path.resolve(root, filename.toString()) === this.codePane.getCurrentFile()) this.scheduleOpenFileCheck();
 				if (event !== 'rename') return; // Content edits do not change file paths.
 				const parts = filename?.toString().split(/[\\/]/) ?? [];
 				if (parts.some((part) => ['.git', this.app.vault.configDir, 'node_modules'].includes(part))) return;
@@ -479,10 +496,7 @@ export class SourceObserverView extends ItemView {
 		} catch { /* The index also refreshes periodically when recursive watching is unavailable. */ }
 		if (!this.isRepo) return;
 
-		const schedule = () => {
-			if (this.refreshTimer) window.clearTimeout(this.refreshTimer);
-			this.refreshTimer = window.setTimeout(() => { void this.refreshChanges(); }, 800);
-		};
+		const schedule = () => this.scheduleChangesRefresh();
 
 		const watch = (target: string) => {
 			try {
@@ -498,8 +512,24 @@ export class SourceObserverView extends ItemView {
 		watch(path.join(this.repoPath, '.git', 'refs'));
 	}
 
+	private scheduleChangesRefresh() {
+		if (this.closed) return;
+		if (this.refreshTimer) window.clearTimeout(this.refreshTimer);
+		this.refreshTimer = window.setTimeout(() => { void this.refreshChanges(); }, 800);
+	}
+
+	/** A write emits several events; check the open file once they settle. */
+	private scheduleOpenFileCheck() {
+		if (this.openFileTimer !== null) window.clearTimeout(this.openFileTimer);
+		this.openFileTimer = window.setTimeout(() => {
+			this.openFileTimer = null;
+			if (!this.closed) void this.codePane.reloadIfChanged();
+		}, 100);
+	}
+
 	private stopWatching() {
 		if (this.fileIndexTimer !== null) { window.clearTimeout(this.fileIndexTimer); this.fileIndexTimer = null; }
+		if (this.openFileTimer !== null) { window.clearTimeout(this.openFileTimer); this.openFileTimer = null; }
 		if (this.refreshTimer) { window.clearTimeout(this.refreshTimer); this.refreshTimer = null; }
 		for (const w of this.watchers) { try { w.close(); } catch { /* ignore */ } }
 		this.watchers = [];

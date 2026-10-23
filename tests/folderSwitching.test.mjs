@@ -151,6 +151,7 @@ function setupView(activePath, paths = [activePath]) {
 		},
 		async open(filePath) { this.opened.push(filePath); this.state.currentPath = filePath; },
 		suspend() {}, rememberPosition() {}, async openAt() {}, getCurrentFile() { return this.state.currentPath; },
+		diskChecks: 0, async reloadIfChanged() { this.diskChecks++; },
 	};
 	const editorTabs = {
 		state: { tabs: [], active: null }, restored: [],
@@ -357,16 +358,18 @@ test('Markdown preview toggles inside its code tab and is restored after a folde
 	assert.equal(view.previewFiles.has(readme), false);
 });
 
-test('backup polling refreshes the tree when filesystem events are missed', async () => {
-	const { view } = setupView('/tmp/so-poll-a', ['/tmp/so-poll-a', '/tmp/so-poll-b']);
+test('backup polling refreshes the tree and the open file when filesystem events are missed', async () => {
+	const { view, codePane } = setupView('/tmp/so-poll-a', ['/tmp/so-poll-a', '/tmp/so-poll-b']);
 	view.pollTimer = null;
 	let poll;
 	globalThis.window.setInterval = callback => { poll = callback; return 1; };
 	await view.activateFolder('/tmp/so-poll-b');
 	let refreshes = 0;
 	view.fileTree.refresh = async () => { refreshes++; };
+	codePane.diskChecks = 0;
 	poll();
 	assert.equal(refreshes, 1);
+	assert.equal(codePane.diskChecks, 1);
 });
 
 test('choosing text in another folder switches sessions before opening the exact occurrence', async () => {
