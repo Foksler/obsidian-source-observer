@@ -203,6 +203,7 @@ export class SourceObserverView extends ItemView {
 			this.updatePreviewToggle();
 			this.setGitContext(this.fileTree.getSelectedPath() ?? { path: this.repoPath, isDirectory: true });
 		}, (tab, event, element) => showFileContextMenu({ path: tab.filePath, isDirectory: false }, event, element, this.repoPath, {
+			app: this.app,
 			onDeleted: (filePath, rootPath) => this.onPathDeleted(filePath, rootPath),
 			addLeadingItems: (menu) => {
 				for (const [title, icon, scope] of [['Close others', 'x', 'others'], ['Close tabs to the left', 'arrow-left-to-line', 'left'],
@@ -254,6 +255,7 @@ export class SourceObserverView extends ItemView {
 			(filePath) => { void this.openTab({ filePath, kind: 'code' }); },
 			(selection) => this.setGitContext(selection),
 			(selection, event, row, root) => showFileContextMenu(selection, event, row, root, {
+				app: this.app,
 				onDeleted: (deletedPath, rootPath) => this.onPathDeleted(deletedPath, rootPath),
 				confirmFolderDelete: (folderPath) => confirmAction(this.app, 'Delete folder',
 					`Are you sure you want to delete "${path.basename(folderPath)}" and everything in it? It will be moved to the system trash.`, 'Delete'),

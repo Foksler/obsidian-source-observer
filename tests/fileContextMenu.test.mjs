@@ -22,6 +22,9 @@ const bundle = await build({ entryPoints: ['src/fileContextMenu.ts'], bundle: tr
   api.onLoad({ filter: /.*/, namespace: 'shim' }, args => ({ loader: 'js', contents: args.path === 'child_process'
    ? `export function execFile(command, args, done) { globalThis.__fileMenu.calls.push(['exec', command, args]); done(globalThis.__fileMenu.execError ?? null, { stdout: command === '/usr/bin/osascript' ? globalThis.__fileMenu.browser : '', stderr: '' }); }`
    : `export const Platform = { get isMacOS() { return globalThis.__fileMenu.mac; } };
+      export class FileSystemAdapter { getBasePath() { return globalThis.__fileMenu.vaultRoot; } }
+      export class TFile { constructor(path) { this.path = path; } }
+      globalThis.__fileMenu.vaultTypes = { FileSystemAdapter, TFile };
       export class Notice { constructor(text) { globalThis.__fileMenu.notices.push(text); } }
       export class Menu {
        items = [];
@@ -363,4 +366,59 @@ test('creation stays inside the project root and follows a link to a folder into
   assert.equal(await createEntry('file', path.join(root, 'outside-link'), 'via link.ts', root), path.join(root, 'outside-link', 'via link.ts'));
   assert.equal(await readFile(path.join(outside, 'via link.ts'), 'utf8'), '');
  } finally { await rm(outside, { recursive: true, force: true }); }
+});
+
+function vaultApp(files) {
+ const { FileSystemAdapter, TFile } = globalThis.__fileMenu.vaultTypes;
+ globalThis.__fileMenu.vaultRoot = root;
+ const notes = new Map(files.map(name => [name, new TFile(name)]));
+ return { vault: { adapter: new FileSystemAdapter(), getAbstractFileByPath: name => notes.get(name) ?? null },
+  workspace: { getLeaf(kind) { calls.push(['leaf', kind]); return { async openFile(file, state) { calls.push(['open', file.path, state]); } }; } }, notes };
+}
+
+test('vault Markdown opens the exact note in an active native tab, including diff-style leading actions', async () => {
+ const name = 'Заметка с пробелами.md', app = vaultApp([name]);
+ const selection = { path: path.join(root, name), isDirectory: false };
+ showFileContextMenu(selection, { clientX: 0 }, {}, root, { app,
+  addLeadingItems: menu => menu.addItem(item => item.setTitle('Close others')) });
+ const menu = menus.at(-1);
+ assert.deepEqual(menu.items.slice(0, 2).map(item => item.title), ['Close others', 'Open in Obsidian']);
+ selection.path = file;
+ await menu.items[1].click();
+ assert.deepEqual(calls, [['leaf', 'tab'], ['open', name, { active: true }]]);
+ assert.deepEqual(notices, []);
+});
+
+test('native open is hidden outside the vault, for folders, non-Markdown and unindexed files', () => {
+ const app = vaultApp(['note.md', 'code.ts']);
+ for (const selection of [
+  { path: path.join(root + '-other', 'note.md'), isDirectory: false },
+  { path: path.join(root, 'note.md'), isDirectory: true },
+  { path: path.join(root, 'code.ts'), isDirectory: false },
+  { path: path.join(root, 'missing.md'), isDirectory: false },
+ ]) {
+  showFileContextMenu(selection, { clientX: 0 }, {}, root, { app });
+  assert.equal(menus.at(-1).items.some(item => item.title === 'Open in Obsidian'), false);
+ }
+ app.vault.adapter = {};
+ showFileContextMenu({ path: path.join(root, 'note.md'), isDirectory: false }, { clientX: 0 }, {}, root, { app });
+ assert.equal(menus.at(-1).items.some(item => item.title === 'Open in Obsidian'), false);
+});
+
+test('native open rechecks stale notes and reports workspace failures', async () => {
+ const app = vaultApp(['note.md']);
+ const show = () => {
+  showFileContextMenu({ path: path.join(root, 'note.md'), isDirectory: false }, { clientX: 0 }, {}, root, { app });
+  return menus.at(-1).items.find(item => item.title === 'Open in Obsidian');
+ };
+ const stale = show();
+ const note = app.notes.get('note.md');
+ app.notes.clear();
+ await stale.click();
+ assert.deepEqual(calls, []);
+ assert.match(notices.at(-1), /Could not open this note/);
+ app.notes.set('note.md', note);
+ app.workspace.getLeaf = () => ({ async openFile() { throw new Error('Open failed'); } });
+ await show().click();
+ assert.equal(notices.length, 2);
 });

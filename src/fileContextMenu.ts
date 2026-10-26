@@ -3,7 +3,7 @@ import { promises as fsp } from 'fs';
 import * as path from 'path';
 import { pathToFileURL } from 'url';
 import { promisify } from 'util';
-import { Menu, Notice, Platform } from 'obsidian';
+import { FileSystemAdapter, Menu, Notice, Platform, TFile, type App } from 'obsidian';
 
 const execFileAsync = promisify(execFile);
 type FileAction = 'copy' | 'copy-relative' | 'reveal' | 'terminal' | 'browser' | 'delete' | 'delete-folder';
@@ -104,6 +104,8 @@ export async function runFileAction(action: FileAction, filePath: string, rootPa
 }
 
 export interface FileMenuOptions {
+	/** Enables opening Markdown notes in the current vault's native editor. */
+	app?: App;
 	/** Runs after the path was moved to trash; folders pass the folder path. */
 	onDeleted?: (deletedPath: string, rootPath: string) => Promise<void>;
 	/** Items placed above the file actions, such as tab closing. */
@@ -119,6 +121,16 @@ export interface FileMenuOptions {
 	onCreated?: (createdPath: string, kind: NewEntryKind, rootPath: string) => Promise<void>;
 }
 
+function vaultMarkdownFile(app: App, filePath: string): TFile | null {
+	const adapter = app.vault.adapter;
+	if (!(adapter instanceof FileSystemAdapter) || path.extname(filePath).toLowerCase() !== '.md') return null;
+	const root = adapter.getBasePath();
+	if (!isInside(root, path.resolve(filePath))) return null;
+	const relative = path.relative(root, filePath).split(path.sep).join('/');
+	const file = app.vault.getAbstractFileByPath(relative);
+	return file instanceof TFile ? file : null;
+}
+
 /** Native Obsidian menu, shared by tree rows, filtered results and source tabs. */
 export function showFileContextMenu(
 	selection: { path: string; isDirectory: boolean; isSymlink?: boolean; linkTarget?: string },
@@ -130,6 +142,19 @@ export function showFileContextMenu(
 	const menu = new Menu();
 	if (options.addLeadingItems) {
 		options.addLeadingItems(menu);
+		menu.addSeparator();
+	}
+	const app = options.app;
+	if (app && !selection.isDirectory && vaultMarkdownFile(app, selection.path)) {
+		const filePath = selection.path;
+		menu.addItem((item) => item.setTitle('Open in Obsidian').setIcon('file-text').onClick(async () => {
+			try {
+				// Resolve again: a file may have been removed or renamed while the menu was open.
+				const file = vaultMarkdownFile(app, filePath);
+				if (!file) throw new Error('Note is no longer available in this vault.');
+				await app.workspace.getLeaf('tab').openFile(file, { active: true });
+			} catch { new Notice('Could not open this note in Obsidian. It may have moved or been deleted.'); }
+		}));
 		menu.addSeparator();
 	}
 	const promptNewName = options.promptNewName;
