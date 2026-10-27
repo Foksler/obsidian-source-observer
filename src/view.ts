@@ -475,6 +475,7 @@ export class SourceObserverView extends ItemView {
 				if (this.closed || folderRequest !== this.folderRequestId || root !== this.repoPath) return;
 				// Show edits made elsewhere, e.g. by a terminal agent, in the open file.
 				if (filename && path.resolve(root, filename.toString()) === this.codePane.getCurrentFile()) this.scheduleOpenFileCheck();
+				this.scheduleChangesRefresh();
 				if (event !== 'rename') return; // Content edits do not change file paths.
 				const parts = filename?.toString().split(/[\\/]/) ?? [];
 				if (parts.some((part) => ['.git', this.app.vault.configDir, 'node_modules'].includes(part))) return;
@@ -611,6 +612,7 @@ export class SourceObserverView extends ItemView {
 
 	private async refreshChanges() {
 		if (!this.repoPath) return;
+		void this.fileTree.refreshGitStatus();
 		const root = this.repoPath;
 		const folderRequest = this.folderRequestId;
 		const requestId = ++this.gitRequestId;

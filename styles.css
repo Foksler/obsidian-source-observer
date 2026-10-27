@@ -299,6 +299,23 @@
 	font-size: var(--so-sidebar-font-size, 12px);
 }
 .so-tree-dir > .so-tree-label { font-weight: 600; }
+.so-tree-row[data-git-status="modified"],
+.so-tree-row[data-git-status="renamed"] { --so-git-color: var(--text-warning); }
+.so-tree-row[data-git-status="added"],
+.so-tree-row[data-git-status="untracked"] { --so-git-color: var(--text-success); }
+.so-tree-row[data-git-status="deleted"],
+.so-tree-row[data-git-status="conflict"] { --so-git-color: var(--text-error); }
+.so-tree-row[data-git-status]:not([data-git-status=""]) > .so-tree-label,
+.so-tree-git-badge { color: var(--so-git-color); }
+.so-tree-git-badge {
+	margin-left: auto;
+	padding-left: 8px;
+	flex-shrink: 0;
+	font-size: var(--so-sidebar-font-size, 12px);
+	font-weight: 600;
+}
+.so-tree-git-badge[hidden] { display: none; }
+.so-tree-dir > .so-tree-git-badge { font-size: 10px; }
 .so-tree-children-hidden { display: none; }
 .so-tree-link-badge {
 	display: flex;

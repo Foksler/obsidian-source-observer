@@ -173,6 +173,7 @@ function setupView(activePath, paths = [activePath]) {
 		setRoot(root) { this.roots.push(root); }, setIncludeWorktrees() {}, setShowHidden() {}, focus() {}, dispose() {},
 	};
 	const fileTree = {
+		async refreshGitStatus() {},
 		async loadPath(root) { return harness.loadTree(root); },
 		async search() {}, async refresh() {}, setIncludeWorktrees() {}, setShowHidden() {}, dispose() {},
 	};

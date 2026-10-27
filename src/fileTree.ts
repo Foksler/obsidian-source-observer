@@ -6,6 +6,7 @@ import { getRegisteredWorktrees } from './searchEngine';
 import { FILE_SEARCH_RESULTS_CAP, searchFilePathIndex } from './filePathIndex.ts';
 import { refreshTree, type TreeNode } from './fileTreeRefresh';
 import { createExcludedFileMatcher, type ExcludedFileMatcher } from './fileExclusions';
+import { getTreeGitStatuses, type TreeGitStatus } from './treeGitStatus';
 
 /** Maximum number of search results before showing a "more results" hint. */
 export const SEARCH_RESULTS_CAP = FILE_SEARCH_RESULTS_CAP;
@@ -79,6 +80,9 @@ export class FileTree {
 	private excludedFiles: ExcludedFileMatcher = () => false;
 	private excludedFilesKey = '';
 	private selectedPath: { path: string; isDirectory: boolean } | null = null;
+	private gitStatuses = new Map<string, TreeGitStatus>();
+	private gitBadges = new WeakMap<HTMLElement, HTMLElement>();
+	private gitRefresh: { generation: number; promise: Promise<void> } | null = null;
 
 	constructor(
 		container: HTMLElement,
@@ -125,6 +129,7 @@ export class FileTree {
 		this.searchQuery = '';
 		if (dirPath !== this.rootPath) this.selectedPath = null;
 		this.rootPath = dirPath;
+		this.gitStatuses.clear();
 		this.treeRoot = null;
 		this.worktreeRoots = [];
 		this.container.empty();
@@ -137,6 +142,44 @@ export class FileTree {
 		if (!treeRoot || seq !== this.loadSeq || this.disposed) return;
 		this.treeRoot = treeRoot;
 		this.renderTree();
+		await this.refreshGitStatus();
+	}
+
+	/** Refresh decorations in place: keep focus, scroll, disclosure and row identities. */
+	async refreshGitStatus(): Promise<void> {
+		if (!this.treeRoot || this.disposed) return;
+		const generation = this.loadSeq;
+		if (this.gitRefresh?.generation === generation) return this.gitRefresh.promise;
+		const directories: string[] = [];
+		const collect = (node: TreeNode) => {
+			if (node.isDir && !node.link) directories.push(node.fullPath);
+			for (const child of node.children ?? []) collect(child);
+		};
+		collect(this.treeRoot);
+		const promise = getTreeGitStatuses(this.rootPath, directories).then((statuses) => {
+			if (this.disposed || generation !== this.loadSeq) return;
+			this.gitStatuses = statuses;
+			for (const row of Array.from(this.container.querySelectorAll<HTMLElement>('.so-tree-row'))) this.decorateGitRow(row);
+		}).finally(() => {
+			if (this.gitRefresh?.generation === generation) this.gitRefresh = null;
+		});
+		this.gitRefresh = { generation, promise };
+		return promise;
+	}
+
+	private decorateGitRow(row: HTMLElement) {
+		let badge = this.gitBadges.get(row);
+		if (!badge) {
+			badge = row.createSpan({ cls: 'so-tree-git-badge' });
+			this.gitBadges.set(row, badge);
+		}
+		const status = this.gitStatuses.get(row.dataset.path ?? '');
+		const directory = row.dataset.directory === 'true';
+		row.dataset.gitStatus = status?.kind ?? '';
+		badge.hidden = !status;
+		badge.setText(status ? (directory ? '●' : status.badge) : '');
+		badge.setAttribute('aria-label', status ? (directory ? 'Contains Git changes' : status.label) : '');
+		badge.title = status ? (directory ? 'Contains Git changes' : `Git: ${status.label}`) : '';
 	}
 
 	/** Update paths on disk while retaining disclosure, selection, focus and scroll. */
@@ -146,7 +189,7 @@ export class FileTree {
 		const generation = this.loadSeq, request = ++this.refreshSeq;
 		const refreshed = await refreshTree(root, (dir) => this.readDir(dir, generation));
 		if (this.disposed || generation !== this.loadSeq || request !== this.refreshSeq || root !== this.treeRoot) return;
-		if (!refreshed.changed && !this.searchQuery) return;
+		if (!refreshed.changed && !this.searchQuery) return this.refreshGitStatus();
 		const selection = this.selectedPath;
 		let selectionExists = true;
 		if (selection) {
@@ -155,6 +198,7 @@ export class FileTree {
 		}
 		if (this.disposed || generation !== this.loadSeq || request !== this.refreshSeq || root !== this.treeRoot) return;
 		this.treeRoot = refreshed.node;
+		void this.refreshGitStatus();
 		if (!selectionExists && this.selectedPath === selection) this.selectedPath = null;
 		const active = this.container.ownerDocument.activeElement;
 		const focusedPath = this.container.contains(active) ? (active as HTMLElement | null)?.dataset?.path : undefined;
@@ -298,6 +342,7 @@ export class FileTree {
 			iconEl.addClass(cls);
 			row.createSpan({ cls: 'so-tree-label', text: rel });
 			row.title = fullPath;
+			this.decorateGitRow(row);
 			row.addEventListener('click', () => {
 				this.container.querySelectorAll('.so-tree-row-active').forEach((el) =>
 					el.removeClass('so-tree-row-active'),
@@ -424,6 +469,7 @@ export class FileTree {
 							node.children = children;
 							childContainer.empty();
 							for (const child of children) this.renderNode(child, childContainer, depth + 1);
+							void this.refreshGitStatus();
 						});
 						return;
 					}
@@ -456,5 +502,6 @@ export class FileTree {
 			setTooltip(badge, `${node.link.broken ? 'Broken link' : 'Link'} → ${node.link.resolved}`,
 				{ placement: 'right', delay: 100, classes: ['so-link-tooltip'] });
 		}
+		this.decorateGitRow(row);
 	}
 }

@@ -17,6 +17,7 @@ class Element {
  children = []; dataset = {}; attrs = {}; classes = new Set(); listeners = new Map(); scrollTop = 0;
  constructor(options = {}, document = { activeElement: null }) { this.ownerDocument = document; for (const cls of (options.cls ?? '').split(' ')) this.classes.add(cls); }
  setAttribute(key, value) { this.attrs[key] = value; }
+ setText(value) { this.textContent = value; }
  setCssProps() {} addClass(cls) { this.classes.add(cls); } removeClass(cls) { this.classes.delete(cls); }
  toggleClass(cls, on) { if (on) this.addClass(cls); else this.removeClass(cls); }
  empty() { this.children = []; } addEventListener(key, fn) { this.listeners.set(key, fn); }

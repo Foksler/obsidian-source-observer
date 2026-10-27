@@ -4,6 +4,9 @@ import { mkdtemp, mkdir, rename, writeFile, rm, symlink, realpath } from 'node:f
 import path from 'node:path';
 import os from 'node:os';
 import { build } from 'esbuild';
+import { execFile } from 'node:child_process';
+import { promisify } from 'node:util';
+import { promises as fsPromises } from 'node:fs';
 
 const bundle = await build({ stdin: { contents: "export { FileTree } from './src/fileTree.ts'; export { invalidateFileIndex } from './src/filePathIndex.ts';", resolveDir: process.cwd() }, bundle: true, platform: 'node', format: 'esm', write: false,
  plugins: [{ name: 'tree-test', setup(api) {
@@ -17,6 +20,7 @@ class Element {
  children = []; dataset = {}; attrs = {}; classes = new Set(); listeners = new Map(); scrollTop = 0;
  constructor(options = {}, document = { activeElement: null }) { this.ownerDocument = document; for (const cls of (options.cls ?? '').split(' ')) this.classes.add(cls); }
  setAttribute(key, value) { this.attrs[key] = value; }
+ setText(value) { this.textContent = value; }
  setCssProps() {} addClass(cls) { this.classes.add(cls); } removeClass(cls) { this.classes.delete(cls); }
  toggleClass(cls, on) { if (on) this.addClass(cls); else this.removeClass(cls); }
  empty() { this.children = []; } addEventListener(key, fn) { this.listeners.set(key, fn); }
@@ -286,4 +290,53 @@ test('Locate selects a folder and keeps it collapsed', async () => {
   assert.equal(row.attrs['aria-expanded'], 'false');
   assert.deepEqual(tree.getSelectedPath(), { path: folder, isDirectory: true });
  } finally { await fixture.cleanup(); }
+});
+
+test('Git refresh decorates existing rows and filtered results without losing focus or scroll; reset clears badges', async () => {
+ const fixture = await setup();
+ const exec = promisify(execFile), git = (...args) => exec('git', ['-C', fixture.root, '-c', 'user.name=Test', '-c', 'user.email=test@example.test', ...args]);
+ try {
+  const { root, tree, file, container } = fixture;
+  await git('init', '--quiet'); await git('add', '.'); await git('commit', '--quiet', '-m', 'fixture');
+  await tree.reveal(file);
+  const rows = container.querySelectorAll('.so-tree-row'), row = rows.at(-1);
+  const directory = rows.find(item => item.dataset.path === path.join(root, 'src'));
+  row.focus(); container.scrollTop = 127;
+  await writeFile(file, 'modified');
+  await tree.refreshGitStatus();
+  assert.equal(container.querySelectorAll('.so-tree-row').at(-1), row);
+  assert.equal(container.ownerDocument.activeElement, row);
+  assert.equal(container.scrollTop, 127);
+  assert.equal(row.dataset.gitStatus, 'modified');
+  assert.equal(row.querySelectorAll('.so-tree-git-badge')[0].textContent, 'M');
+  assert.equal(directory.querySelectorAll('.so-tree-git-badge')[0].textContent, '●');
+  await tree.search('Current');
+  const filtered = container.querySelectorAll('.so-tree-row')[0];
+  assert.equal(filtered.dataset.gitStatus, 'modified');
+  await git('restore', '.'); await tree.refreshGitStatus();
+  assert.equal(filtered.dataset.gitStatus, '');
+  assert.equal(filtered.querySelectorAll('.so-tree-git-badge')[0].hidden, true);
+  assert.equal(filtered.querySelectorAll('.so-tree-git-badge').length, 1);
+ } finally { await fixture.cleanup(); }
+});
+
+test('a late Git snapshot cannot decorate a different folder after switching roots', async () => {
+ const fixture = await setup(), original = fsPromises.stat;
+ let release, started;
+ const waiting = new Promise(resolve => { started = resolve; });
+ try {
+  fsPromises.stat = async (...args) => {
+   if (args[0] === path.join(fixture.root, 'src', '.git')) {
+    started(); await new Promise(resolve => { release = resolve; });
+   }
+   return original(...args);
+  };
+  const pending = fixture.tree.refreshGitStatus(); await waiting;
+  await fixture.tree.loadPath(path.dirname(fixture.file));
+  const row = fixture.container.querySelectorAll('.so-tree-row')[0];
+  release(); await pending;
+  assert.equal(fixture.container.querySelectorAll('.so-tree-row')[0], row);
+  assert.equal(row.dataset.gitStatus, '');
+  assert.equal(row.dataset.path, path.dirname(fixture.file));
+ } finally { fsPromises.stat = original; release?.(); await fixture.cleanup(); }
 });

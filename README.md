@@ -21,6 +21,7 @@ The original author's MIT licence and Git history are preserved.
 - **Editing** — edit any text file; changes are saved a second after you stop typing, when you switch files and on Cmd+S (Ctrl+S). A file changed on disk elsewhere is never overwritten unasked, and an open file without unsaved edits reloads when it changes on disk
 - **Folder tabs** — open several folders from the toolbar, switch between them above the file tree, and close a folder with its × button. Each folder keeps its own files, cursor positions, navigation history, and search while the view is open; the folder list and active folder also survive a restart.
 - **Git diff** — changed files listed in the sidebar with M/A/D badges and new/modified counts; click any file to see its diff or full content
+- **Git tree colours** — modified files appear in amber, added/untracked files in green, deletions/conflicts in red. Files carry a status badge; folders carry a dot when they contain changes, even while collapsed. Decorations refresh automatically without resetting the tree. Nested repositories and worktrees are detected as their parent directories are opened.
 - **Collapsible sections** — Files and Changes panels collapse independently
 - **Search** — search content with regex and filters, or search filenames; worktrees are excluded by default and can be included
 - **Search modes** — keep the VS Code sidebar, or use PhpStorm-style Search Everywhere and Find in Files windows with a source preview
