@@ -2,7 +2,7 @@ import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { EventEmitter } from 'node:events';
 import { PassThrough } from 'node:stream';
-import { encodeLspMessage, stdioTransport, takeLspMessages } from '../src/lspTransport.ts';
+import { encodeLspMessage, stdioTransport, takeLspMessages } from '../src/desktop/lspTransport.ts';
 
 function fakeProcess({ exitCode = null, killed = false } = {}) {
 	const proc = new EventEmitter();
@@ -81,4 +81,20 @@ describe('LSP stdio framing', () => {
 		proc.stdout.destroy();
 		proc.stderr.destroy();
 	});
+});
+
+it('server showMessageRequest is presented and dismissed with null, never selecting a supplied action',async()=>{
+ const proc=fakeProcess(),shown=[];const transport=stdioTransport(proc,async()=>({}),'php',(message,type)=>shown.push({message,type}));const received=[];transport.subscribe(message=>received.push(message));
+ proc.stdout.write(encodeLspMessage(JSON.stringify({jsonrpc:'2.0',id:0,method:'window/showMessageRequest',params:{type:3,message:'Information λ',actions:[{title:'Perform action'}]}})));
+ await new Promise(r=>setImmediate(r));assert.deepEqual(shown,[{message:'Information λ',type:3}]);
+ const {messages}=takeLspMessages(proc.stdin.read());assert.deepEqual(JSON.parse(messages[0]),{jsonrpc:'2.0',id:0,result:null});assert.deepEqual(received,[]);
+ proc.stdout.write(encodeLspMessage(JSON.stringify({jsonrpc:'2.0',id:1,method:'client/registerCapability',params:{}})));assert.equal(JSON.parse(received[0]).method,'client/registerCapability');
+ proc.stdin.destroy();proc.stdout.destroy();proc.stderr.destroy();
+});
+
+it('host presentation failure still returns a null dismissal to the server',()=>{
+ const proc=fakeProcess(),transport=stdioTransport(proc,async()=>({}),'php',()=>{throw Error('closed window');});transport.subscribe(()=>{});
+ proc.stdout.write(encodeLspMessage(JSON.stringify({jsonrpc:'2.0',id:'info',method:'window/showMessageRequest',params:{message:'Information'}})));
+ const {messages}=takeLspMessages(proc.stdin.read());assert.equal(JSON.parse(messages[0]).result,null);
+ proc.stdin.destroy();proc.stdout.destroy();proc.stderr.destroy();
 });

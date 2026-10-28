@@ -7,7 +7,7 @@ import { build } from 'esbuild';
 
 const temp = await mkdtemp(path.join(process.cwd(), 'tests', '.find-modal-'));
 const bundle = path.join(temp, 'modal.mjs');
-await build({ entryPoints: ['src/findInFilesModal.ts'], bundle: true, platform: 'node', format: 'esm', outfile: bundle,
+await build({ entryPoints: ['src/ui/findInFilesModal.ts'], bundle: true, platform: 'node', format: 'esm', outfile: bundle,
 	plugins: [{ name: 'find-harness', setup(api) {
 		api.onResolve({ filter: /^obsidian$/ }, () => ({ path: 'obsidian', namespace: 'shim' }));
 		api.onLoad({ filter: /.*/, namespace: 'shim' }, () => ({ contents: `
@@ -24,15 +24,15 @@ await build({ entryPoints: ['src/findInFilesModal.ts'], bundle: true, platform: 
 			export class App {}
 			export function setIcon() {}
 		`, loader: 'js' }));
-		api.onResolve({ filter: /^\.\/findInFilesScope$/ }, () => ({ path: 'scope', namespace: 'scope' }));
+		api.onResolve({ filter: /^\.\.\/search\/index\.ts$/ }, () => ({ path: 'scope', namespace: 'scope' }));
 		api.onLoad({ filter: /.*/, namespace: 'scope' }, () => ({ contents: `
-			export function initialFindState(context, saved) { return { query: '', area: 'project', module: context.root,
+			export const SEARCH_TABS=['all','files','classes','symbols','actions','text'];export const SEARCH_TAB_LABELS={};export function initialFindState(context, saved) { return { query: '', area: 'project', module: context.root,
 				namedScope: 'project', options: {}, ...saved }; }
 			export function findModules(context) { return Promise.resolve([context.root]); }
 			export function moduleForPath(modules) { return modules[0]; }
 			export function searchFindInFiles(...args) { return globalThis.__findHarness.search(...args); }
 		`, loader: 'js' }));
-		api.onResolve({ filter: /^\.\/findInFilesPreview$/ }, () => ({ path: 'preview', namespace: 'preview' }));
+		api.onResolve({ filter: /^\.\/findInFilesPreview(?:\.ts)?$/ }, () => ({ path: 'preview', namespace: 'preview' }));
 		api.onLoad({ filter: /.*/, namespace: 'preview' }, () => ({ contents: `
 			export class FindInFilesPreview {
 				shown = []; clear() { this.shown = []; } show(...args) { this.shown.push(args); }

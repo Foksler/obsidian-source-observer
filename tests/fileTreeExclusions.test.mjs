@@ -5,11 +5,11 @@ import path from 'node:path';
 import os from 'node:os';
 import { build } from 'esbuild';
 
-const bundle = await build({ stdin: { contents: "export { FileTree } from './src/fileTree.ts';", resolveDir: process.cwd() }, bundle: true, platform: 'node', format: 'esm', write: false,
+const bundle = await build({ stdin: { contents: "export { FileTree } from './src/ui/fileTree.ts';", resolveDir: process.cwd() }, bundle: true, platform: 'node', format: 'esm', write: false,
  plugins: [{ name: 'tree-test', setup(api) {
   api.onResolve({ filter: /^obsidian$/ }, () => ({ path: 'obsidian', namespace: 'shim' }));
   api.onLoad({ filter: /.*/, namespace: 'shim' }, () => ({ contents: 'export function setIcon(element, name) { element.icon = name; } export function setTooltip() {}', loader: 'js' }));
-  api.onResolve({ filter: /^\.\/searchEngine$/ }, () => ({ path: 'search', namespace: 'search' }));
+
   api.onLoad({ filter: /.*/, namespace: 'search' }, () => ({ contents: 'export async function getRegisteredWorktrees() { return []; }', loader: 'js' }));
  } }] });
 const { FileTree } = await import(`data:text/javascript;base64,${Buffer.from(bundle.outputFiles[0].text).toString('base64')}`);

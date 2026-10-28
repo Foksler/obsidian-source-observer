@@ -10,7 +10,7 @@ test('a filename beyond the bounded shared index is still found and ranked befor
 	const dir = await mkdtemp(path.join(os.tmpdir(), 'source-observer-index-overflow-'));
 	t.after(() => rm(dir, { recursive: true, force: true }));
 	const bundle = path.join(dir, 'index.mjs');
-	await build({ entryPoints: ['src/filePathIndex.ts'], bundle: true, platform: 'node', format: 'esm', outfile: bundle,
+	await build({ entryPoints: ['tests/helpers/legacyFileIndex.ts'], bundle: true, platform: 'node', format: 'esm', outfile: bundle,
 		plugins: [{ name: 'large-inventory', setup(api) {
 			api.onResolve({ filter: /rgRunner\.ts$/ }, () => ({ path: 'rg', namespace: 'inventory' }));
 			api.onLoad({ filter: /.*/, namespace: 'inventory' }, () => ({ contents: `

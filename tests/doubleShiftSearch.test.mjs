@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { registerDoubleShiftSearch } from '../src/searchMode.ts';
+import { registerDoubleShiftSearch } from '../src/ui/searchMode.ts';
 
 function setup(docked = false) {
 	const listeners = new Map();

@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 import test from 'node:test';
-import { createHoverLifecycle, hoverContentsToMarkdown, hoverTooltipRect, hoverTooltipWidth, renderHoverContent } from '../src/hoverMarkdown.ts';
+import { createHoverLifecycle, hoverContentsToMarkdown, hoverTooltipRect, hoverTooltipWidth, renderHoverContent } from '../src/ui/hoverMarkdown.ts';
 
 test('LSP hover markdown preserves markdown and turns legacy code strings into fenced snippets', () => {
 	assert.equal(hoverContentsToMarkdown({ kind: 'markdown', value: '**app()** returns `string`' }), '**app()** returns `string`');

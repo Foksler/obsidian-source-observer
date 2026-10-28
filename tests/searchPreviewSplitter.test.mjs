@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { build } from 'esbuild';
 
-const bundle = await build({ entryPoints: ['src/verticalSplitter.ts'], bundle: true, platform: 'node', format: 'esm', write: false });
+const bundle = await build({ entryPoints: ['src/ui/verticalSplitter.ts'], bundle: true, platform: 'node', format: 'esm', write: false });
 const { addVerticalSplitter } = await import(`data:text/javascript;base64,${Buffer.from(bundle.outputFiles[0].text).toString('base64')}`);
 
 function setup(options = {}) {

@@ -1,11 +1,14 @@
+import {SearchRuntime} from '../src/search/SearchRuntime.ts';
+import {getRegisteredWorktrees} from '../src/git/WorktreeDiscovery.ts';
 import assert from 'node:assert/strict';
 import { mkdtemp, mkdir, rm, symlink, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
-import { initialFindState, findModules, moduleForPath, searchFindInFiles } from '../src/findInFilesScope.ts';
+import { initialFindState, findModules, moduleForPath, searchFindInFiles } from '../src/search/findInFilesScope.ts';
 
 async function fixture(t) {
+ const search=new SearchRuntime(getRegisteredWorktrees);t.after(()=>search.dispose());
 	const parent = await mkdtemp(path.join(os.tmpdir(), 'source-observer-find-'));
 	t.after(() => rm(parent, { recursive: true, force: true }));
 	const root = path.join(parent, 'active');
@@ -19,7 +22,7 @@ async function fixture(t) {
 	await writeFile(path.join(root, 'module-a', 'src', 'notes.md'), 'needle');
 	await writeFile(path.join(root, 'module-b', 'other.php'), 'needle');
 	await writeFile(path.join(parent, 'inactive', 'other.php'), 'needle');
-	return { root, treeFocused: false, selectedPath: null, currentFile: path.join(root, 'module-a', 'src', 'main.php'),
+	return { search, root, treeFocused: false, selectedPath: null, currentFile: path.join(root, 'module-a', 'src', 'main.php'),
 		openFiles: [path.join(root, 'module-a', 'src', 'main.php'), path.join(parent, 'inactive', 'other.php')],
 		includeWorktrees: false, showHidden: true };
 }

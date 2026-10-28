@@ -16,11 +16,11 @@ globalThis.window = { require(name) {
    await rename(value, path.join(trash, path.basename(value))); }
  } };
 } };
-const bundle = await build({ entryPoints: ['src/fileContextMenu.ts'], bundle: true, platform: 'node', format: 'esm', write: false,
+const bundle = await build({ entryPoints: ['tests/helpers/fileActionsAdapter.ts'], bundle: true, platform: 'node', format: 'esm', write: false,
  plugins: [{ name: 'native-actions', setup(api) {
   api.onResolve({ filter: /^(obsidian|child_process)$/ }, args => ({ path: args.path, namespace: 'shim' }));
   api.onLoad({ filter: /.*/, namespace: 'shim' }, args => ({ loader: 'js', contents: args.path === 'child_process'
-   ? `export function execFile(command, args, done) { globalThis.__fileMenu.calls.push(['exec', command, args]); done(globalThis.__fileMenu.execError ?? null, { stdout: command === '/usr/bin/osascript' ? globalThis.__fileMenu.browser : '', stderr: '' }); }`
+   ? `export function spawn(){throw new Error('Unexpected process spawn');} export function execFile(command, args, done) { globalThis.__fileMenu.calls.push(['exec', command, args]); done(globalThis.__fileMenu.execError ?? null, { stdout: command === '/usr/bin/osascript' ? globalThis.__fileMenu.browser : '', stderr: '' }); }`
    : `export const Platform = { get isMacOS() { return globalThis.__fileMenu.mac; } };
       export class FileSystemAdapter { getBasePath() { return globalThis.__fileMenu.vaultRoot; } }
       export class TFile { constructor(path) { this.path = path; } }

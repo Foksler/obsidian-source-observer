@@ -5,7 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 import { promisify } from 'node:util';
-import { searchContent, searchContentFallback, listFiles, listFilesDetailed, resolveRgExecutable } from '../src/searchEngine.ts';
+import { searchContent, searchContentFallback, listFiles, listFilesDetailed, resolveRgExecutable } from './helpers/legacySearchEngine.ts';
 
 const execFileAsync = promisify(execFile);
 

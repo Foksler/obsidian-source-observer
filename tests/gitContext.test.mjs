@@ -5,7 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
-import { getGitRoot, getChangedFiles, getFileDiff } from '../src/gitDiff.ts';
+import { getGitRoot, getChangedFiles, getFileDiff } from '../src/git/gitDiff.ts';
 const exec = promisify(execFile);
 
 test('Git context resolves nested folders, open files and worktrees without requiring the workspace root to be Git', async () => {

@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { bindShortcuts, normalizeShortcuts, shortcutFromEvent, sameShortcut } from '../src/searchShortcuts.ts';
+import {bindShortcuts} from '../src/ui/searchShortcuts.ts';
+import {normalizeShortcuts,shortcutFromEvent,sameShortcut} from '../src/app/Shortcuts.ts';
 
 test('shortcut migration clones defaults, preserves cleared keys and rejects modifier-only or plain typing bindings', () => {
 	const first = normalizeShortcuts({ quickOpen: null, findInFiles: { key: 'Shift', modifiers: [] }, findInFile: { key: 's', modifiers: [] } });

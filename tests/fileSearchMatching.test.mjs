@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { createFileMatcher } from '../src/fileSearchMatching.ts';
+import { createFileMatcher } from '../src/search/fileSearchMatching.ts';
 
 test('exact basename stem outranks a basename substring, which outranks directory-only hits', () => {
 	const match = createFileMatcher('controller');

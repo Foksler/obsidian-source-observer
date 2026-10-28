@@ -10,7 +10,7 @@ const tempDir = await mkdtemp(path.join(process.cwd(), 'tests', '.php-syntax-'))
 const bundlePath = path.join(tempDir, 'phpSyntax.mjs');
 await build({
 	stdin: {
-		contents: `export { phpSemicolonTag, phpTokenMarks, phpWithSemanticHighlighting } from './src/phpSyntax.ts';\nexport { monokaiHighlight } from './src/editorThemes.ts';`,
+		contents: `export { phpSemicolonTag, phpTokenMarks, phpWithSemanticHighlighting } from './src/ui/phpSyntax.ts';\nexport { monokaiHighlight } from './src/ui/editorThemes.ts';`,
 		resolveDir: process.cwd(),
 		sourcefile: 'php-syntax-test-entry.ts',
 	},

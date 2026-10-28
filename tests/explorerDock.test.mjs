@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { build } from 'esbuild';
 
-const bundle = await build({ entryPoints: ['src/explorerDock.ts'], bundle: true, platform: 'node', format: 'esm', write: false,
+const bundle = await build({ entryPoints: ['src/obsidian/explorerDock.ts'], bundle: true, platform: 'node', format: 'esm', write: false,
  plugins: [{ name: 'dock-test', setup(api) {
   api.onResolve({ filter: /^obsidian$/ }, () => ({ path: 'obsidian', namespace: 'shim' }));
   api.onLoad({ filter: /.*/, namespace: 'shim' }, () => ({ contents: `

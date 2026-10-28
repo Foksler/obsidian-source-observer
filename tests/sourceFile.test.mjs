@@ -3,7 +3,7 @@ import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
-import { lineBreakFor, readSourceText, saveIfUnchanged } from '../src/sourceFile.ts';
+import { lineBreakFor, readSourceText, saveIfUnchanged } from '../src/files/sourceFile.ts';
 
 test('only UTF-8 text that round-trips byte for byte is editable', async (t) => {
 	const root = await mkdtemp(path.join(os.tmpdir(), 'source-observer-source-'));

@@ -7,7 +7,7 @@ import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { build } from 'esbuild';
 
-const bundle = await build({ entryPoints: ['src/treeGitStatus.ts'], bundle: true, platform: 'node', format: 'esm', write: false });
+const bundle = await build({ entryPoints: ['src/git/treeGitStatus.ts'], bundle: true, platform: 'node', format: 'esm', write: false });
 const { getTreeGitStatuses, treeGitStatus } = await import(`data:text/javascript;base64,${Buffer.from(bundle.outputFiles[0].text).toString('base64')}`);
 const exec = promisify(execFile);
 const git = (root, ...args) => exec('git', ['-C', root, '-c', 'user.name=Test', '-c', 'user.email=test@example.test', ...args]);

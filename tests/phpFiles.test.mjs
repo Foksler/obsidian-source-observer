@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { it } from 'node:test';
-import { isPhpFile } from '../src/phpFiles.ts';
+import { isPhpFile } from '../src/files/phpFiles.ts';
 
 it('recognizes PHP files and common PHP configuration scripts', () => {
 	for (const file of ['AdminController.php', 'artisan', '.php_cs', '.php_cs.dist', '.pre', 'project.pre']) {

@@ -1,14 +1,18 @@
+import {SearchRuntime} from '../src/search/SearchRuntime.ts';
+import {getRegisteredWorktrees} from '../src/git/WorktreeDiscovery.ts';
 import assert from 'node:assert/strict';
 import { mkdtemp, mkdir, realpath, rm, symlink, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import test from 'node:test';
-import { searchEverywhere, symbolResults } from '../src/searchEverywhere.ts';
-import { normalizeSearchMode, DoubleShiftGesture } from '../src/searchMode.ts';
-import { searchContent, searchContentFallback } from '../src/searchEngine.ts';
+import { searchEverywhere, symbolResults } from '../src/search/searchEverywhere.ts';
+import {DoubleShiftGesture} from '../src/ui/searchMode.ts';
+import {normalizeSearchMode} from '../src/app/SearchPreferences.ts';
+import { searchContent, searchContentFallback } from './helpers/legacySearchEngine.ts';
 
 async function fixture(t) {
+ const search=new SearchRuntime(getRegisteredWorktrees);t.after(()=>search.dispose());
 	const root = await realpath(await mkdtemp(path.join(os.tmpdir(), 'source-observer-everywhere-')));
 	t.after(() => rm(root, { recursive: true, force: true }));
 	await mkdir(path.join(root, 'src'));
@@ -17,7 +21,7 @@ async function fixture(t) {
 	await writeFile(path.join(root, '.hidden.php'), 'needle');
 	await mkdir(path.join(root, 'worktrees'));
 	await writeFile(path.join(root, 'worktrees', 'DashboardWorktree.php'), 'needle');
-	return { root, includeWorktrees: false, showHidden: true, recentFiles: [], actions: [] };
+	return { search, root, includeWorktrees: false, showHidden: true, recentFiles: [], actions: [] };
 }
 
 async function batches(context, tab, query, options = {}) {

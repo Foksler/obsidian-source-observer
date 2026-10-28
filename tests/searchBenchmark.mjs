@@ -26,8 +26,8 @@ if (!rg) {
 } else {
 	process.env.PATH = `${path.dirname(rg)}${path.delimiter}${process.env.PATH ?? ''}`;
 	const [{ getRegisteredWorktrees }, { invalidateFilePathIndex, searchFilePathIndex }] = await Promise.all([
-		import('../src/searchEngine.ts'),
-		import('../src/filePathIndex.ts'),
+		import('./helpers/legacySearchEngine.ts'),
+		import('./helpers/legacyFileIndex.ts'),
 	]);
 	const worktrees = await getRegisteredWorktrees(root);
 	const rgArgs = ['--files', '--hidden', '--no-ignore', '--null'];

@@ -3,7 +3,7 @@ import { mkdtemp, mkdir, rm, symlink, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
-import { collectFilePaths, inventoryFilePaths } from '../src/fileInventory.ts';
+import { collectFilePaths, inventoryFilePaths } from '../src/files/fileInventory.ts';
 
 test('full filename enumeration preserves newline names and the index ignore, worktree and symlink rules', async (t) => {
 	const root = await mkdtemp(path.join(os.tmpdir(), 'source-observer-inventory-'));

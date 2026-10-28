@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import path from 'node:path';
 import test from 'node:test';
-import { closeFolderWorkspace, normalizeFolderWorkspace } from '../src/folderWorkspace.ts';
+import { closeFolderWorkspace, normalizeFolderWorkspace } from '../src/workspace/folderWorkspace.ts';
 
 const folder = (value) => path.resolve(value);
 

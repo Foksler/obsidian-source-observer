@@ -1,3 +1,4 @@
+import { FileObservationRuntime } from '../src/files/FileObservation.ts';
 import assert from 'node:assert/strict';
 import { mkdtemp, mkdir, rm } from 'node:fs/promises';
 import path from 'node:path';
@@ -9,7 +10,7 @@ const tempDir = await mkdtemp(path.join(process.cwd(), 'tests', '.folder-switchi
 const bundlePath = path.join(tempDir, 'view.mjs');
 await build({
 	stdin: {
-		contents: `export { SourceObserverView } from './src/view.ts';`,
+		contents: `export { SourceObserverView } from './tests/helpers/viewAdapter.ts';`,
 		resolveDir: process.cwd(),
 		sourcefile: 'folder-switching-test-entry.ts',
 	},
@@ -34,9 +35,11 @@ await build({
 			`, loader: 'js' }));
 
 			const stubs = {
-				'./fileTree': 'export class FileTree {}',
+				'./findInFilesModal':'export class FindInFilesModal {}',
+ './renderDiff':'export function renderDiff(){}',
+ './fileTree': 'export class FileTree {}',
 				'./fileContextMenu': 'export function showFileContextMenu() {}',
-				'./confirmModal': 'export function confirmAction() { return Promise.resolve(false); }',
+				'./confirmModal': 'export function confirmAction() { return Promise.resolve(false); } export function chooseDocumentConflict() { return Promise.resolve("cancel"); }',
 				'./nameModal': 'export function promptForName() { return Promise.resolve(false); }',
 				'./codePane': 'export class CodePane {}',
 				'./searchPanel': 'export class SearchPanel {}',
@@ -45,8 +48,8 @@ await build({
 				'./symbolPicker': 'export class SymbolPicker {}',
 				'./filePicker': 'export class FilePicker {}',
 				'./searchEverywhereModal': 'export class SearchEverywhereModal {}',
-				'./markdownPreview': `
-					export class MarkdownPreview {}
+				'../obsidian/index': `
+					export class MarkdownPreview {} export const EXPLORER_VIEW_TYPE='source-observer-explorer';
 					export function isMarkdownFile(filePath) { return filePath.endsWith('.md'); }
 				`,
 				'./lspNavigation': `
@@ -57,26 +60,26 @@ await build({
 					}
 					export function navigationAdapters(settings) { return ['php', 'go'].filter((id) => settings[id + 'Lsp']); }
 				`,
-				'./searchEngine': `
+				'../search/index': `
 					export function getRegisteredWorktrees(root) { return globalThis.__folderSwitchHarness.worktrees(root); }
 					export function invalidateFileIndex(root) { globalThis.__folderSwitchHarness.invalidated = root; }
 					export function warmFileIndex() { return Promise.resolve(); }
 				`,
-				'./gitDiff': `
+				'../git/index': `
 					export async function getGitRoot(root) {
 						const harness = globalThis.__folderSwitchHarness;
 						return await harness.isGitRepo(root) ? harness.gitRoots.get(root) ?? root : null;
 					}
 					export function getChangedFiles(root) { return globalThis.__folderSwitchHarness.getChangedFiles(root); }
 					export function getFileDiff() { return Promise.resolve(''); }
-					export function renderDiff() {}
+					export function clearWorktreeCaches() {} export function findLanguageWorktrees(){return Promise.resolve([]);}
 				`,
 			};
-			buildApi.onResolve({ filter: /^\.\// }, (args) => stubs[args.path]
-				? { path: args.path.slice(2), namespace: 'folder-test-stub' }
+			buildApi.onResolve({ filter: /^\.\.?\// }, (args) => stubs[args.path.replace(/\.ts$/, '')]
+				? { path: args.path.replace(/\.ts$/, ''), namespace: 'folder-test-stub' }
 				: null);
 			buildApi.onLoad({ filter: /.*/, namespace: 'folder-test-stub' }, (args) => ({
-				contents: stubs[`./${args.path}`], loader: 'js',
+				contents: stubs[args.path], loader: 'js',
 			}));
 		},
 	}],
@@ -133,12 +136,21 @@ function setupView(activePath, paths = [activePath]) {
 
 	const view = Object.create(SourceObserverView.prototype);
 	const plugin = {
+  observations:new FileObservationRuntime(),
+  search:{invalidate(root){harness.invalidated=root;},warm(){return Promise.resolve();}},
+  worktrees:{roots:root=>harness.worktrees(root),clear(){}},
+  repositories:{
+   async resolve(target){const root=await harness.isGitRepo(target)?harness.gitRoots.get(target)??target:null;return root?{state:'ready',context:{root,gitDir:path.join(root,'.git'),commonDir:path.join(root,'.git')}}:{state:'outside'};},
+   async read(context){return {state:'ready',context,revision:1,changes:await harness.getChangedFiles(context.root)};},
+   invalidate(){},invalidatePath(){},invalidateDiscovery(){},
+  },
 		settings: {
 			openedFolderPaths: [...paths], lastOpenedPath: activePath,
 			includeWorktrees: false, showHidden: false, gitPanelHidden: false,
 			phpLsp: false, nodePath: '', intelephensePath: '', intelephenseLicence: '',
 		},
 		savedSettingsCount: 0,
+		persistDocumentRecovery() {},
 		async saveSettings() { this.savedSettingsCount++; },
 	};
 	const codePane = {
@@ -149,8 +161,9 @@ function setupView(activePath, paths = [activePath]) {
 			this.restored.push(structuredClone(session));
 			this.state = session ? structuredClone(session) : { name: 'fresh', currentPath: null, location: null };
 		},
+		restorePreparedSession(session) {this.restoreSession(session);return true;},
 		async open(filePath) { this.opened.push(filePath); this.state.currentPath = filePath; },
-		suspend() {}, rememberPosition() {}, async openAt() {}, getCurrentFile() { return this.state.currentPath; },
+		async prepareToLeave() { return true; }, disposeView() {}, suspend() {}, rememberPosition() {}, async openAt() {}, getCurrentFile() { return this.state.currentPath; },
 		diskChecks: 0, async reloadIfChanged() { this.diskChecks++; },
 	};
 	const editorTabs = {
@@ -209,13 +222,9 @@ function setupView(activePath, paths = [activePath]) {
 		changesSearchInput: fakeElement(),
 		changesQuery: '',
 		allChanges: [],
-		watchers: [],
 		filePicker: null,
 		indexedWorktrees: [],
-		pollTimer: 1,
-		refreshTimer: null,
 		treeSearchTimer: null,
-		fileIndexTimer: null,
 		languageNavigation: null,
 		lspKey: '',
 		stopWatching() {},
@@ -359,9 +368,11 @@ test('Markdown preview toggles inside its code tab and is restored after a folde
 	assert.equal(view.previewFiles.has(readme), false);
 });
 
-test('backup polling refreshes the tree and the open file when filesystem events are missed', async () => {
+test('backup polling refreshes the tree and the open file when filesystem events are missed', async t => {
 	const { view, codePane } = setupView('/tmp/so-poll-a', ['/tmp/so-poll-a', '/tmp/so-poll-b']);
-	view.pollTimer = null;
+	view.startWatching=()=>SourceObserverView.prototype.startWatching.call(view);
+ view.stopWatching=()=>SourceObserverView.prototype.stopWatching.call(view);
+ t.after(()=>view.stopWatching());
 	let poll;
 	globalThis.window.setInterval = callback => { poll = callback; return 1; };
 	await view.activateFolder('/tmp/so-poll-b');
@@ -463,6 +474,7 @@ test('late folder-tree callback after rapid A to B to A cannot replace the activ
 	harness.worktreeResult.set(b, lateWorktrees);
 
 	const switchToB = view.activateFolder(b);
+	await new Promise(resolve => setImmediate(resolve)); // Drain preparation without resolving the deferred tree/worktree IO.
 	assert.equal(view.repoPath, b);
 	const switchToA = view.activateFolder(a);
 	await switchToA;
@@ -667,4 +679,28 @@ test('changing enabled languages replaces navigation and clears search-only clie
 	assert.equal(mixed.disposed, true);
 	assert.equal(view.languageNavigation, null);
 	assert.equal(attached.at(-1), null);
+});
+
+test('blocked folder close retains the active folder, saved sessions and persisted settings', async () => {
+ const {view,codePane}=setupView('/one',['/one','/two']);
+ const session={editor:codePane.captureSession(),tabs:{tabs:[],active:null},search:{query:'kept'},treeQuery:'a',changesQuery:'b'};
+ view.folderSessions.set('/one',session);codePane.prepareToLeave=async()=>false;
+ await view.closeFolder('/one');
+ assert.equal(view.repoPath,'/one');assert.deepEqual(view.folderPaths,['/one','/two']);
+ assert.equal(view.folderSessions.get('/one'),session);assert.equal(view.plugin.savedSettingsCount,0);
+});
+
+test('blocked Markdown preview leaves the source mode and rendered editor unchanged', async () => {
+ const {view,codePane}=setupView('/one');
+ view.editorTabs.show({filePath:'/one/note.md',kind:'code'});codePane.prepareToLeave=async()=>false;
+ await view.toggleMarkdownPreview();assert.equal(view.previewFiles.has('/one/note.md'),false);
+ assert.deepEqual(view.markdownPreview.shown,[]);
+});
+
+test('a Git status error retains rows and counts from the same repository and recovers without flicker',async()=>{
+ const {view,harness}=setupView('/one');harness.changedResult.set('/one',{promise:Promise.resolve([{code:' M',file:'keep.ts'}])});
+ await view.refreshChanges();const rows=view.changesContainer.emptyCalls,changes=view.allChanges,context={root:'/one',gitDir:'/one/.git',commonDir:'/one/.git'};
+ const read=view.plugin.repositories.read;view.plugin.repositories.read=async()=>({state:'error',context,error:'index unavailable',lastGood:{state:'ready',context,revision:1,changes}});
+ await view.refreshChanges();assert.equal(view.gitError,'index unavailable');assert.equal(view.changesContainer.emptyCalls,rows);assert.equal(view.allChanges,changes);assert.equal(view.gitSection.hidden,false);
+ view.plugin.repositories.read=read;await view.refreshChanges();assert.equal(view.gitError,null);assert.equal(view.changesContainer.emptyCalls,rows);
 });

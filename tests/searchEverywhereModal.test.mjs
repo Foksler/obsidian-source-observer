@@ -8,7 +8,7 @@ import { build } from 'esbuild';
 const temp = await mkdtemp(path.join(process.cwd(), 'tests', '.search-modal-'));
 const bundle = path.join(temp, 'modal.mjs');
 await build({
-	entryPoints: ['src/searchEverywhereModal.ts'], bundle: true, platform: 'node', format: 'esm', outfile: bundle,
+	entryPoints: ['src/ui/searchEverywhereModal.ts'], bundle: true, platform: 'node', format: 'esm', outfile: bundle,
 	plugins: [{ name: 'modal-harness', setup(api) {
 		api.onResolve({ filter: /^obsidian$/ }, () => ({ path: 'obsidian', namespace: 'shim' }));
 		api.onLoad({ filter: /.*/, namespace: 'shim' }, () => ({ contents: `
@@ -33,11 +33,11 @@ await build({
 			export class App {}
 			export function setIcon() {}
 		`, loader: 'js' }));
-		api.onResolve({ filter: /^\.\/findInFilesPreview$/ }, () => ({ path: 'preview', namespace: 'preview' }));
+		api.onResolve({ filter: /^\.\/findInFilesPreview(?:\.ts)?$/ }, () => ({ path: 'preview', namespace: 'preview' }));
 		api.onLoad({ filter: /.*/, namespace: 'preview' }, () => ({ contents: `
 			export class FindInFilesPreview { shown = []; clear() { this.shown = []; } show(...args) { this.shown.push(args); } dispose() { this.disposed = true; } }
 		`, loader: 'js' }));
-		api.onResolve({ filter: /^\.\/searchEverywhere$/ }, () => ({ path: 'provider', namespace: 'provider' }));
+		api.onResolve({ filter: /^\.\.\/search\/index\.ts$/ }, () => ({ path: 'provider', namespace: 'provider' }));
 		api.onLoad({ filter: /.*/, namespace: 'provider' }, () => ({ contents: `
 			export const SEARCH_TABS = ['all', 'files', 'classes', 'symbols', 'actions', 'text'];
 			export const SEARCH_TAB_LABELS = Object.fromEntries(SEARCH_TABS.map(tab => [tab, tab]));

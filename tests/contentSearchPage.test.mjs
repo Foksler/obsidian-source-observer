@@ -3,9 +3,9 @@ import { mkdtemp, mkdir, rm, symlink, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
-import { searchContentPage } from '../src/contentSearchPage.ts';
-import { resolveRgExecutable, streamRipgrep } from '../src/rgRunner.ts';
-import { searchContent, searchContentFallback } from '../src/searchEngine.ts';
+import { searchContentPage } from '../src/search/contentSearchPage.ts';
+import { resolveRgExecutable, streamRipgrep } from '../src/files/rgRunner.ts';
+import { searchContent, searchContentFallback } from './helpers/legacySearchEngine.ts';
 
 async function fixture(t, text) {
 	const root = await mkdtemp(path.join(os.tmpdir(), 'source-observer-page-'));

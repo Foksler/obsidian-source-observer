@@ -3,11 +3,11 @@ import { constants, promises as fs } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import test, { after, before, mock } from 'node:test';
-import { searchContentPage } from '../src/contentSearchPage.ts';
-import { resolveRgExecutable, streamRipgrep } from '../src/rgRunner.ts';
-import { searchContent } from '../src/searchEngine.ts';
-import { collectFilePaths, inventoryFilePaths } from '../src/fileInventory.ts';
-import { setExcludedFiles } from '../src/fileExclusions.ts';
+import { searchContentPage } from '../src/search/contentSearchPage.ts';
+import { resolveRgExecutable, streamRipgrep } from '../src/files/rgRunner.ts';
+import { searchContent } from './helpers/legacySearchEngine.ts';
+import { collectFilePaths, inventoryFilePaths } from '../src/files/fileInventory.ts';
+import { setExcludedFiles } from '../src/files/fileExclusions.ts';
 
 // Node runs each test file in its own process, keeping discovery's cached result isolated.
 before(() => {

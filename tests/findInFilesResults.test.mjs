@@ -7,7 +7,7 @@ import { build } from 'esbuild';
 
 const temp = await mkdtemp(path.join(process.cwd(), 'tests', '.find-results-'));
 const bundle = path.join(temp, 'results.mjs');
-await build({ entryPoints: ['src/findInFilesResults.ts'], bundle: true, packages: 'external', platform: 'node', format: 'esm', outfile: bundle });
+await build({ entryPoints: ['src/ui/findInFilesResults.ts'], bundle: true, packages: 'external', platform: 'node', format: 'esm', outfile: bundle });
 const { findSnippetParts, renderFindSnippet, renderFindFileHeader, renderFindLocation } = await import(pathToFileURL(bundle).href);
 test.after(() => rm(temp, { recursive: true, force: true }));
 

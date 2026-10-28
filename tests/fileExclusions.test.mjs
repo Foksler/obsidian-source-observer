@@ -5,9 +5,9 @@ import path from 'node:path';
 import test from 'node:test';
 import {
 	DEFAULT_EXCLUDED_FILES, createExcludedFileMatcher, excludedFileRgGlobs, normalizeExcludedFiles, setExcludedFiles,
-} from '../src/fileExclusions.ts';
-import { inventoryFilePaths } from '../src/fileInventory.ts';
-import { listFilesDetailed, searchContent } from '../src/searchEngine.ts';
+} from '../src/files/fileExclusions.ts';
+import { inventoryFilePaths } from '../src/files/fileInventory.ts';
+import { listFilesDetailed, searchContent } from './helpers/legacySearchEngine.ts';
 
 test('exclusions match names at any depth, slash patterns from the folder root, and everything inside a folder', () => {
 	const excluded = createExcludedFileMatcher(['.DS_Store', '*.log', '/build/', 'docs/generated', '**/tmp']);

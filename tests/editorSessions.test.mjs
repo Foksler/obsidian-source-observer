@@ -9,7 +9,7 @@ const tempDir = await mkdtemp(path.join(process.cwd(), 'tests', '.editor-session
 const bundlePath = path.join(tempDir, 'editorSessions.mjs');
 await build({
 	stdin: {
-		contents: `export { CodePane, cloneCodePaneSession } from './src/codePane.ts';\nexport { EditorTabs, cloneEditorTabsState } from './src/editorTabs.ts';`,
+		contents: `export { CodePane, cloneCodePaneSession } from './tests/helpers/codePaneAdapter.ts';\nexport { EditorTabs, cloneEditorTabsState } from './tests/helpers/editorTabsAdapter.ts';`,
 		resolveDir: process.cwd(),
 		sourcefile: 'editor-sessions-test-entry.ts',
 	},
@@ -256,4 +256,21 @@ test('closing other, left or right tabs keeps the clicked tab and selects it onl
 	tabs.closeRelative(tab('x.ts'), 'others');
 	assert.deepEqual(names(), ['/x.ts']);
 	assert.deepEqual(selected.at(-1), tab('x.ts'));
+});
+
+test('tab close waits for document approval and cancellation preserves the exact tab state', async () => {
+ const tabs=new EditorTabs(fakeElement(),()=>{},()=>{}), answer=deferred();
+ tabs.show({filePath:'/one.ts',kind:'code'}); tabs.show({filePath:'/two.ts',kind:'code'});
+ const before=tabs.captureState(); tabs.setCloseGuard(()=>answer.promise); tabs.closeActive();
+ assert.deepEqual(tabs.captureState(),before); answer.resolve(false); await Promise.resolve();
+ assert.deepEqual(tabs.captureState(),before);
+});
+
+test('a late tab-close approval cannot close a new session; inactive closes do not prompt', async () => {
+ const tabs=new EditorTabs(fakeElement(),()=>{},()=>{}), answer=deferred(); let prompts=0;
+ tabs.show({filePath:'/one.ts',kind:'code'}); tabs.show({filePath:'/two.ts',kind:'code'});
+ tabs.setCloseGuard(()=>{prompts++;return answer.promise;}); tabs.closeRelative({filePath:'/two.ts',kind:'code'},'left');
+ assert.equal(prompts,0); tabs.closeActive(); assert.equal(prompts,1);
+ tabs.restoreState({tabs:[{filePath:'/three.ts',kind:'code'}],active:{filePath:'/three.ts',kind:'code'}});
+ answer.resolve(true); await Promise.resolve(); assert.equal(tabs.getActive().filePath,'/three.ts');
 });

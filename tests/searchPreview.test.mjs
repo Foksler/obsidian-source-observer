@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { searchPreview } from '../src/searchPreview.ts';
+import { searchPreview } from '../src/search/searchPreview.ts';
 
 test('a megabyte generated line retains the searched token in a bounded preview', () => {
 	const prefix = 'x'.repeat(900_000);

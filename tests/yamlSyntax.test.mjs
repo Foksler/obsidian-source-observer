@@ -10,7 +10,7 @@ const tempDir = await mkdtemp(path.join(process.cwd(), 'tests', '.yaml-syntax-')
 const bundlePath = path.join(tempDir, 'yamlSyntax.mjs');
 await build({
 	stdin: {
-		contents: `export { yamlKeyTag, yamlWithKeyHighlighting } from './src/yamlSyntax.ts';\nexport { monokaiHighlight } from './src/editorThemes.ts';`,
+		contents: `export { yamlKeyTag, yamlWithKeyHighlighting } from './src/ui/yamlSyntax.ts';\nexport { monokaiHighlight } from './src/ui/editorThemes.ts';`,
 		resolveDir: process.cwd(),
 		sourcefile: 'yaml-syntax-test-entry.ts',
 	},

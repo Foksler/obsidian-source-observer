@@ -13,7 +13,7 @@ test('cancelling one index waiter preserves the shared build; invalidated pendin
 	const scans = [];
 	globalThis.__indexScans = scans;
 	t.after(() => { delete globalThis.__indexScans; });
-	await build({ entryPoints: ['src/filePathIndex.ts'], bundle: true, platform: 'node', format: 'esm', outfile,
+	await build({ entryPoints: ['tests/helpers/legacyFileIndex.ts'], bundle: true, platform: 'node', format: 'esm', outfile,
 		plugins: [{ name: 'controlled-inventory', setup(api) {
 			api.onResolve({ filter: /rgRunner\.ts$/ }, () => ({ path: 'rg', namespace: 'controlled' }));
 			api.onLoad({ filter: /.*/, namespace: 'controlled' }, () => ({ contents: `

@@ -4,7 +4,7 @@ import { mkdtemp, mkdir, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { it } from 'node:test';
-import { createIntelephenseSettings, findWorkspaceComposerRoots } from '../src/lspWorkspaceRoots.ts';
+import { createIntelephenseSettings, findWorkspaceComposerRoots } from '../src/language/ProjectDiscovery.ts';
 
 it('finds nested Composer roots lazily and excludes generic and registered worktrees by default', async () => {
 	const root = await mkdtemp(path.join(tmpdir(), 'source-observer-roots-'));

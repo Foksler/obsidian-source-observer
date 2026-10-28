@@ -6,8 +6,8 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { it } from 'node:test';
-import { encodeLspMessage, takeLspMessages } from '../src/lspTransport.ts';
-import { dispatchDefinitionLocation } from '../src/lspWorkspace.ts';
+import { encodeLspMessage, takeLspMessages } from '../src/desktop/lspTransport.ts';
+import { dispatchDefinitionLocation } from '../src/ui/lspWorkspace.ts';
 import { Text } from '@codemirror/state';
 
 const serverPath = path.resolve('node_modules/intelephense/lib/intelephense.js');

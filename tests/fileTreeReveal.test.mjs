@@ -8,14 +8,14 @@ import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { promises as fsPromises } from 'node:fs';
 
-const bundle = await build({ stdin: { contents: "export { FileTree } from './src/fileTree.ts'; export { invalidateFileIndex } from './src/filePathIndex.ts';", resolveDir: process.cwd() }, bundle: true, platform: 'node', format: 'esm', write: false,
+const bundle = await build({ stdin: { contents: "export { FileTree } from './src/ui/fileTree.ts'; export {SearchRuntime} from './src/search/SearchRuntime.ts';export {getRegisteredWorktrees} from './src/git/WorktreeDiscovery.ts';", resolveDir: process.cwd() }, bundle: true, platform: 'node', format: 'esm', write: false,
  plugins: [{ name: 'tree-test', setup(api) {
   api.onResolve({ filter: /^obsidian$/ }, () => ({ path: 'obsidian', namespace: 'shim' }));
   api.onLoad({ filter: /.*/, namespace: 'shim' }, () => ({ contents: 'export function setIcon(element, name) { element.icon = name; } export function setTooltip(element, text) { element.tooltip = text; }', loader: 'js' }));
-  api.onResolve({ filter: /^\.\/searchEngine$/ }, () => ({ path: 'search', namespace: 'search' }));
+
   api.onLoad({ filter: /.*/, namespace: 'search' }, () => ({ contents: 'export async function getRegisteredWorktrees() { return []; }', loader: 'js' }));
  } }] });
-const { FileTree, invalidateFileIndex } = await import(`data:text/javascript;base64,${Buffer.from(bundle.outputFiles[0].text).toString('base64')}`);
+const { FileTree, SearchRuntime,getRegisteredWorktrees } = await import(`data:text/javascript;base64,${Buffer.from(bundle.outputFiles[0].text).toString('base64')}`);
 class Element {
  children = []; dataset = {}; attrs = {}; classes = new Set(); listeners = new Map(); scrollTop = 0;
  constructor(options = {}, document = { activeElement: null }) { this.ownerDocument = document; for (const cls of (options.cls ?? '').split(' ')) this.classes.add(cls); }
@@ -38,8 +38,9 @@ async function setup(hidden = true) {
  await writeFile(file, '<?php');
  const container = new Element(), opened = [];
  const tree = new FileTree(container, hidden, file => opened.push(file));
+ const search=new SearchRuntime(getRegisteredWorktrees);tree.setSearchRuntime(search);
  await tree.loadPath(root);
- return { root, file, container, tree, opened, async cleanup() { tree.dispose(); await rm(root, { recursive: true, force: true }); } };
+ return { root, file, container, tree, opened, async cleanup() { tree.dispose();search.dispose(); await rm(root, { recursive: true, force: true }); } };
 }
 
 test('Locate expands lazy ancestors, selects and scrolls the current file without reopening it', async () => {
@@ -165,7 +166,7 @@ test('refresh keeps the active filename filter and includes newly created matchi
   await tree.search('Current');
   const added = path.join(root, 'CurrentNew.php');
   await writeFile(added, '<?php');
-  invalidateFileIndex(root);
+  tree.searchRuntime.invalidate(root);
   await tree.refresh();
   assert.deepEqual(container.querySelectorAll('.so-tree-row').map(row => row.dataset.path).sort(), [fixture.file, added].sort());
  } finally { await fixture.cleanup(); }
@@ -249,7 +250,8 @@ test('symlinked folders expand through the link, keep in-root paths and mark bro
   await symlink(path.join(outside, 'CLAUDE.md'), path.join(root, 'CLAUDE.md'));
   await symlink(path.join(root, 'missing'), path.join(root, 'broken'));
   await symlink(root, path.join(root, 'src', 'cycle'));
-  await tree.loadPath(root);
+  const search=new SearchRuntime(getRegisteredWorktrees);tree.setSearchRuntime(search);
+ await tree.loadPath(root);
   const rowFor = target => container.querySelectorAll('.so-tree-row').find(row => row.dataset.path === target);
   const skills = rowFor(path.join(root, 'skills')), memory = rowFor(path.join(root, 'CLAUDE.md')), broken = rowFor(path.join(root, 'broken'));
   assert.equal(skills.dataset.directory, 'true');
