@@ -585,10 +585,18 @@ export class SourceObserverView extends ItemView {
 		const dir = path.dirname(cf.file);
 		if (dir && dir !== '.') label.createSpan({ cls: 'so-change-dir', text: ` ${dir}/` });
 		row.title = cf.file;
+		const filePath = path.isAbsolute(cf.file) ? cf.file : path.join(root, cf.file);
+		row.addEventListener('contextmenu', (event) => {
+			if (this.closed || root !== this.gitRoot) return;
+			event.preventDefault();
+			event.stopPropagation();
+			this.plugin.showFileMenu({ path: filePath, isDirectory: false }, event, row, root, {
+				onDeleted: (deletedPath, rootPath) => this.onPathDeleted(deletedPath, rootPath),
+			});
+		});
 
 		row.addEventListener('click', () => {
 			if (this.closed || root !== this.gitRoot) return;
-			const filePath = path.isAbsolute(cf.file) ? cf.file : path.join(root, cf.file);
 			void this.openTab({ filePath, kind: 'diff' });
 		});
 	}

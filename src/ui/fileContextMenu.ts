@@ -29,7 +29,7 @@ export interface FileMenuOptions {
 	onCreated?: (createdPath: string, kind: NewEntryKind, rootPath: string) => Promise<void>;
 }
 
-/** Native Obsidian menu, shared by tree rows, filtered results and source tabs. */
+/** Native Obsidian menu, shared by tree rows, filtered results, Changes and source tabs. */
 export function showFileContextMenu(
 	selection: { path: string; isDirectory: boolean; isSymlink?: boolean; linkTarget?: string },
 	event: MouseEvent | KeyboardEvent,
