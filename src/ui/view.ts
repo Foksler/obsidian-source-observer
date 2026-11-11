@@ -278,6 +278,8 @@ export class SourceObserverView extends ItemView {
 				onDeleted: (deletedPath, rootPath) => this.onPathDeleted(deletedPath, rootPath),
 				confirmFolderDelete: (folderPath) => confirmAction(this.app, 'Delete folder',
 					`Are you sure you want to delete "${path.basename(folderPath)}" and everything in it? It will be moved to the system trash.`, 'Delete'),
+				confirmExternalLinkDelete: (linkPath) => confirmAction(this.app, 'Delete symbolic link',
+					`Move the symbolic link "${linkPath}" outside the project to the system trash?`, 'Move to trash'),
 				promptNewName: (kind, parentDir, submit) => promptForName(this.app, kind === 'file' ? 'New file' : 'New folder',
 					`In ${path.join(path.basename(root), path.relative(root, parentDir))}`, 'Create', submit),
 				onCreated: (createdPath, kind, rootPath) => this.onPathCreated(createdPath, kind, rootPath),

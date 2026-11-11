@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { mkdtemp, mkdir, writeFile, symlink, rm, rename, readFile, lstat } from 'node:fs/promises';
+import { mkdtemp, mkdir, writeFile, symlink, rm, rename, readFile, lstat, realpath } from 'node:fs/promises';
 import path from 'node:path';
 import os from 'node:os';
 import { build } from 'esbuild';
@@ -262,6 +262,39 @@ test('Delete on a link to a folder trashes only the link, without the folder pro
  assert.deepEqual(notices, ['Link moved to trash.']);
  assert.equal((await lstat(path.join(trash, 'linked-folder'))).isSymbolicLink(), true);
  assert.equal(await readFile(file, 'utf8'), 'export {};');
+});
+
+test('Delete confirms the actual path of a broken link in an external folder before trashing it', async (t) => {
+ const outside = await mkdtemp(path.join(os.tmpdir(), 'so-outside-links-'));
+ t.after(() => rm(outside, { recursive: true, force: true }));
+ const parentLink = path.join(root, 'linked-skills');
+ const name = 'removed-skill';
+ const actualLink = path.join(await realpath(outside), name);
+ const displayedLink = path.join(parentLink, name);
+ await symlink(outside, parentLink);
+ await symlink(path.join(root, 'missing-skill'), actualLink);
+ const asked = [], deleted = [];
+ let confirmed = false;
+ showFileContextMenu({ path: displayedLink, isDirectory: false, isSymlink: true }, { clientX: 0 }, {}, root, {
+  confirmExternalLinkDelete: async target => { asked.push(target); return confirmed; },
+  onDeleted: async target => { deleted.push(target); },
+ });
+ const deleteItem = menus.at(-1).items.at(-1);
+ await deleteItem.click();
+ assert.deepEqual(asked, [actualLink]);
+ assert.deepEqual(calls, []);
+ assert.deepEqual(deleted, []);
+ assert.deepEqual(notices, []);
+ assert.equal((await lstat(actualLink)).isSymbolicLink(), true);
+
+ confirmed = true;
+ await deleteItem.click();
+ assert.deepEqual(calls, [['trash', actualLink]]);
+ assert.deepEqual(deleted, [displayedLink]);
+ assert.deepEqual(notices, ['Link moved to trash.']);
+ await assert.rejects(lstat(actualLink), { code: 'ENOENT' });
+ assert.equal((await lstat(path.join(trash, name))).isSymbolicLink(), true);
+ assert.equal((await lstat(parentLink)).isSymbolicLink(), true);
 });
 
 test('stale file menus reject replacement directories; trash failures preserve the file and skip refresh', async () => {

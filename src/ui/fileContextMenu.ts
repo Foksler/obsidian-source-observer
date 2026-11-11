@@ -20,6 +20,7 @@ export interface FileMenuOptions {
 	addLeadingItems?: (menu: Menu) => void;
 	/** Asked before a folder is moved to trash; deletion proceeds only on true. */
 	confirmFolderDelete?: (folderPath: string) => Promise<boolean>;
+	confirmExternalLinkDelete?: (linkPath: string) => Promise<boolean>;
 	/**
 	 * Asks for a new entry's name and passes it to `submit`, which returns an error to show or null once created.
 	 * Resolves true after a successful submit. Without it the menu offers no New file and New folder.
@@ -97,7 +98,16 @@ export function showFileContextMenu(
 		menu.addItem((item) => item.setTitle('Delete').setIcon('trash-2').onClick(async () => {
 			const targetPath = selection.path;
 			if (folder && options.confirmFolderDelete && !await options.confirmFolderDelete(targetPath)) return;
-			try { await trashEntry(folder?'folder':'file',targetPath,rootPath,path=>services.desktop.trash(path)); }
+			try {
+				const deleted = await trashEntry(
+					selection.isSymlink ? 'link' : folder ? 'folder' : 'file',
+					targetPath,
+					rootPath,
+					(linkPath) => services.desktop.trash(linkPath),
+					options.confirmExternalLinkDelete,
+				);
+				if (!deleted) return;
+			}
 			catch { new Notice(`Could not move this ${kind.toLowerCase()} to trash.`); return; }
 			new Notice(`${kind} moved to trash.`);
 			try { await options.onDeleted?.(targetPath, rootPath); }

@@ -37,17 +37,36 @@ export async function createEntry(kind: NewEntryKind, parentDir: string, name: s
 	return target;
 }
 
-/** Trash resolves the parent, preserving link identity; creation deliberately follows directory links. */
-export async function trashEntry(kind:'file'|'folder',filePath:string,rootPath:string,trash:(path:string)=>Promise<void>):Promise<void> {
- const fullPath=path.resolve(filePath);
-		if (!rootPath || !isInside(path.resolve(rootPath), fullPath)) throw new Error('Path is outside the project root.');
-		const info = await fsp.lstat(fullPath);
-		// A stale menu must not trash a folder that replaced a file, or the reverse.
-		if (kind === 'file' && !info.isFile() && !info.isSymbolicLink()) throw new Error('Only files can be deleted.');
-		if (kind === 'folder' && !info.isDirectory()) throw new Error('Only folders can be deleted.');
-		// Resolve the parent, not the final symlink: trash the link itself, never its target.
-		const [root, parent] = await Promise.all([fsp.realpath(rootPath), fsp.realpath(path.dirname(fullPath))]);
-		if (parent !== root && !isInside(root, parent)) throw new Error('File parent is outside the project root.');
+/** Returns false when the user cancels deletion of a link in an external folder. */
+export async function trashEntry(
+	kind: 'file' | 'folder' | 'link',
+	filePath: string,
+	rootPath: string,
+	trash: (path: string) => Promise<void>,
+	confirmExternalLink?: (linkPath: string) => Promise<boolean>,
+): Promise<boolean> {
+	const fullPath = path.resolve(filePath);
+	if (!rootPath || !isInside(path.resolve(rootPath), fullPath)) throw new Error('Path is outside the project root.');
+	const info = await fsp.lstat(fullPath);
+	if (kind === 'file' && !info.isFile() && !info.isSymbolicLink()) throw new Error('Only files can be deleted.');
+	if (kind === 'folder' && !info.isDirectory()) throw new Error('Only folders can be deleted.');
+	if (kind === 'link' && !info.isSymbolicLink()) throw new Error('Path is no longer a symbolic link.');
+
+	const parentPath = path.dirname(fullPath);
+	const [root, parent] = await Promise.all([fsp.realpath(rootPath), fsp.realpath(parentPath)]);
+	if (parent === root || isInside(root, parent)) {
 		await trash(fullPath);
-		return;
+		return true;
+	}
+	if (kind !== 'link' || !confirmExternalLink) throw new Error('File parent is outside the project root.');
+
+	// Resolve only the parent, so the confirmation and Trash both refer to the link itself.
+	const linkPath = path.join(parent, path.basename(fullPath));
+	if (!await confirmExternalLink(linkPath)) return false;
+	const [currentParent, currentLink] = await Promise.all([fsp.realpath(parentPath), fsp.lstat(linkPath)]);
+	if (currentParent !== parent || !currentLink.isSymbolicLink() || currentLink.dev !== info.dev || currentLink.ino !== info.ino) {
+		throw new Error('Symbolic link changed while confirming deletion.');
+	}
+	await trash(linkPath);
+	return true;
 }

@@ -24,3 +24,25 @@ test('a confirmed folder replaced with a symlink is refused before invoking the 
  const root=await fixture(t),folder=path.join(root,'folder'),outside=path.join(root,'outside');await mkdir(folder);await mkdir(outside);await rm(folder,{recursive:true});await symlink(outside,folder);
  let calls=0;await assert.rejects(trashEntry('folder',folder,root,async()=>{calls++;}),/Only folders/);assert.equal(calls,0);
 });
+
+test('a link replaced with a regular file during confirmation cannot be trashed', async (t) => {
+ const root = await fixture(t);
+ const project = path.join(root, 'project');
+ const outside = path.join(root, 'outside');
+ await mkdir(project);
+ await mkdir(outside);
+ await symlink(outside, path.join(project, 'linked'));
+ const externalLink = path.join(outside, 'skill');
+ await symlink(path.join(project, 'missing'), externalLink);
+ let trashed = false;
+ await assert.rejects(trashEntry('link', path.join(project, 'linked', 'skill'), project,
+  async () => { trashed = true; },
+  async () => {
+   await rm(externalLink);
+   await writeFile(externalLink, 'keep');
+   return true;
+  },
+ ), /changed while confirming/);
+ assert.equal(trashed, false);
+ assert.equal(await readFile(externalLink, 'utf8'), 'keep');
+});
