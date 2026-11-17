@@ -4,6 +4,28 @@ import { setIcon } from 'obsidian';
 import { TabSession, type SourceTab, type EditorTabsState, type TabCloseScope } from '../workspace/index.ts';
 export type { SourceTab, EditorTabsState, TabCloseScope } from '../workspace/index.ts';
 
+/** For tabs whose file names collide, the shortest parent-folder suffix that tells them apart. */
+export function tabPathHints(filePaths: readonly string[]): Map<string, string> {
+	const groups = new Map<string, string[]>();
+	for (const filePath of new Set(filePaths)) {
+		const name = path.basename(filePath);
+		groups.set(name, [...(groups.get(name) ?? []), filePath]);
+	}
+	const hints = new Map<string, string>();
+	for (const group of groups.values()) {
+		if (group.length < 2) continue;
+		const dirs = new Map(group.map(filePath => [filePath, path.dirname(filePath).split(/[\\/]/).filter(Boolean)]));
+		for (const [filePath, segments] of dirs) {
+			const suffix = (parts: string[], n: number) => parts.slice(-n).join('/');
+			let n = 1;
+			while (n < segments.length && [...dirs].some(([other, parts]) => other !== filePath && suffix(parts, n) === suffix(segments, n))) n++;
+			const hint = suffix(segments, n);
+			hints.set(filePath, n < segments.length ? `…/${hint}` : hint || '/');
+		}
+	}
+	return hints;
+}
+
 /** File tabs stay separate from the editor so LSP jumps use the same tab strip. */
 export class EditorTabs {
 	private sessionState?: TabSession;
@@ -45,11 +67,14 @@ export class EditorTabs {
  private close(tab:SourceTab) {this.requestClose(()=>this.session.close(tab),this.key(tab)===this.session.active);}
 	private render() {
 		this.container.empty();
+		const hints = tabPathHints(this.session.tabs.map(tab => tab.filePath));
 		for (const tab of this.session.tabs) {
 			const selected = this.key(tab) === this.session.active;
 			const wrapper = this.container.createDiv({ cls: `so-tab${selected ? ' so-tab-active' : ''}` });
 			const button = wrapper.createEl('button', { cls: 'so-tab-select', text: path.basename(tab.filePath) + (tab.kind === 'diff' ? ' (diff)' : ''),
 				attr: { role: 'tab', 'aria-selected': String(selected), tabindex: selected ? '0' : '-1', title: tab.filePath } });
+			const hint = hints.get(tab.filePath);
+			if (hint) button.createEl('span', { cls: 'so-tab-path', text: hint });
 			button.addEventListener('click', () => this.onSelect(tab));
 			// Same file actions as the tree; opening the menu does not switch tabs.
 			wrapper.addEventListener('contextmenu', (event) => {

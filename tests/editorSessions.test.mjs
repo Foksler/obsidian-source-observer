@@ -9,7 +9,7 @@ const tempDir = await mkdtemp(path.join(process.cwd(), 'tests', '.editor-session
 const bundlePath = path.join(tempDir, 'editorSessions.mjs');
 await build({
 	stdin: {
-		contents: `export { CodePane, cloneCodePaneSession } from './tests/helpers/codePaneAdapter.ts';\nexport { EditorTabs, cloneEditorTabsState } from './tests/helpers/editorTabsAdapter.ts';`,
+		contents: `export { CodePane, cloneCodePaneSession } from './tests/helpers/codePaneAdapter.ts';\nexport { EditorTabs, cloneEditorTabsState, tabPathHints } from './tests/helpers/editorTabsAdapter.ts';`,
 		resolveDir: process.cwd(),
 		sourcefile: 'editor-sessions-test-entry.ts',
 	},
@@ -26,7 +26,7 @@ await build({
 		},
 	}],
 });
-const { CodePane, cloneCodePaneSession, EditorTabs, cloneEditorTabsState } = await import(pathToFileURL(bundlePath).href);
+const { CodePane, cloneCodePaneSession, EditorTabs, cloneEditorTabsState, tabPathHints } = await import(pathToFileURL(bundlePath).href);
 
 test.after(async () => rm(tempDir, { recursive: true, force: true }));
 
@@ -273,4 +273,14 @@ test('a late tab-close approval cannot close a new session; inactive closes do n
  assert.equal(prompts,0); tabs.closeActive(); assert.equal(prompts,1);
  tabs.restoreState({tabs:[{filePath:'/three.ts',kind:'code'}],active:{filePath:'/three.ts',kind:'code'}});
  answer.resolve(true); await Promise.resolve(); assert.equal(tabs.getActive().filePath,'/three.ts');
+});
+
+test('tabs with the same file name show the shortest distinguishing parent folder', () => {
+	const hints = tabPathHints(['/repo/core/.env', '/repo/router/.env', '/repo/a.ts', '/x/api/config/app.ts',
+		'/y/web/config/app.ts', '/repo/core/.env', '/repo/.env']);
+	assert.deepEqual(Object.fromEntries(hints), {
+		'/repo/core/.env': '…/core', '/repo/router/.env': '…/router', '/repo/.env': 'repo',
+		'/x/api/config/app.ts': '…/api/config', '/y/web/config/app.ts': '…/web/config',
+	});
+	assert.equal(tabPathHints(['/repo/a.ts', '/repo/a.ts']).size, 0);
 });
